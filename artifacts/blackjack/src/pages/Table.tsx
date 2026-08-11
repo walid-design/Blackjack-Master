@@ -152,10 +152,14 @@ export default function Table() {
     return () => clearTimeout(t);
   }, [state.phase]);
 
-  // Trigger settlement
+  // Trigger settlement — delay grows with dealer card count so all stagger
+  // animations (delay: i × 120ms) finish before results are revealed.
   useEffect(() => {
     if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
-      const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), 500);
+      const cardCount: number = (state.dealerCards || []).length;
+      // last card stagger: (cardCount-1)*120ms + spring settle ~650ms
+      const delay = Math.max(700, (cardCount - 1) * 120 + 650);
+      const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
       return () => clearTimeout(t);
     }
   }, [state.phase, (state as any).settled]);
@@ -356,7 +360,22 @@ export default function Table() {
 function DealerZone({ state }: { state: any }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
-  const val = revealed && dealerCards.length > 0 ? calculateHandValue(dealerCards) : null;
+
+  // Delay the score/bust badge until all staggered card animations have landed.
+  // During SETTLEMENT the dealer may have drawn many extra cards; each card's
+  // entry animation has delay: i * 120ms + spring settle ~500ms.
+  // During DEALER_TURN only 2 cards are shown (hole card hidden) — show immediately.
+  const [badgeReady, setBadgeReady] = useState(false);
+  useEffect(() => {
+    if (!revealed || dealerCards.length === 0) { setBadgeReady(false); return; }
+    if (state.phase !== 'SETTLEMENT') { setBadgeReady(true); return; }
+    // Wait for the last card's stagger + spring to finish
+    const delay = Math.max(350, (dealerCards.length - 1) * 120 + 500);
+    const t = setTimeout(() => setBadgeReady(true), delay);
+    return () => { clearTimeout(t); setBadgeReady(false); };
+  }, [state.phase, dealerCards.length, revealed]);
+
+  const val = badgeReady && dealerCards.length > 0 ? calculateHandValue(dealerCards) : null;
 
   return (
     <div style={{
