@@ -8,7 +8,7 @@ import { gameReducer, createInitialState } from '@/lib/reducer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
 import { PlayingCard } from '@/components/PlayingCard';
-import { Chip, ChipStack } from '@/components/Chip';
+import { Chip, ChipStack, SideBetChip, BankrollStack, ChipBurst } from '@/components/Chip';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -65,6 +65,10 @@ export default function Table() {
 
   // Lifted chip selection – needed by ControlBar (display) and SeatSpot (bet placement)
   const [selectedChip, setSelectedChip] = useState(25);
+
+  // Track previous bankroll for delta animation
+  const prevBankrollRef = useRef(state.bankroll);
+  useEffect(() => { prevBankrollRef.current = state.bankroll; }, [state.bankroll]);
 
   // Dealer history: last 15 rounds' dealer outcome
   const [dealerHistory, setDealerHistory] = useState<DealerHistoryEntry[]>([]);
@@ -262,11 +266,11 @@ export default function Table() {
           {/* Card shoe */}
           <CardShoe shoe={state.shoe} decks={tableConfig.decks} />
 
-          {/* Seats */}
+          {/* Seats — arc point is the CENTRE of the bet circle; SeatSpot anchors to it */}
           {seatPositions.map(({ x, y }, i) => (
             <div key={i} style={{
               position: 'absolute', left: `${x}%`, top: `${y}%`,
-              transform: 'translate(-50%, -50%)',
+              /* NO transform here — SeatSpot positions its own elements around (0,0) */
               zIndex: state.activeSeatIndex === i ? 20 : 10,
             }}>
               <SeatSpot
@@ -276,6 +280,8 @@ export default function Table() {
                 seatIndex={i}
                 config={tableConfig}
                 selectedChip={selectedChip}
+                seatXPct={x}
+                seatYPct={y}
               />
             </div>
           ))}
@@ -399,12 +405,30 @@ function CardShoe({ shoe, decks }: { shoe: Card[]; decks: number }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Seat Spot (all per-seat UI: cards, bet circle, side bets, action buttons)
+// Seat Spot
+// The outer wrapper (in Table) places a 0×0 div exactly at the arc point.
+// Every child here uses absolute positioning relative to that 0×0 anchor, so
+// the bet circle is ALWAYS fixed at the arc point regardless of how much
+// content exists above (cards) or below (action buttons / side bets).
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
+/** Approximate card deal origin relative to a seat (for animation trajectory). */
+function cardDealOrigin(seatXPct: number): { x: number; y: number } {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  // Shoe is at right:4% of felt; felt = 106% vw → shoe is at ~96% of felt from left
+  // Simplified: shoe ≈ 97% of vw
+  const shoeX = vw * 0.97;
+  const seatX  = vw * (seatXPct / 100);
+  return {
+    x: shoeX - seatX, // always positive (shoe is to the right of every seat)
+    y: -320,           // shoe is always above — fixed approximation
+  };
+}
+
+function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
+  seatXPct: number; seatYPct: number;
 }) {
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
   const isPlayerTurn   = state.phase === 'PLAYER_TURN' && state.activeSeatIndex === seatIndex;
@@ -412,123 +436,167 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
   const isSelectedBet  = state.bettingSeatId === seatIndex;
   const currentBet     = seat.hands[0]?.bet ?? 0;
 
-  // Active hand info for action buttons
   const activeHand: Hand | undefined = seat.hands[seat.activeHandIndex];
-  const canDouble    = !!activeHand && activeHand.cards.length === 2 && state.bankroll >= activeHand.bet;
+
+  // Natural blackjack (non-split 2-card 21): auto-stood, no actions shown
+  const hasNaturalBJ = !!activeHand && !activeHand.isSplit
+    && activeHand.cards.length === 2
+    && calculateHandValue(activeHand.cards).total === 21;
+
+  // Double: allowed on any number of cards (any-double rule), requires bankroll
+  const canDouble    = !!activeHand && !hasNaturalBJ && state.bankroll >= activeHand.bet;
+
+  // Split: first 2 matching cards, max 4 hands, bankroll available
   const canSplit     = !!activeHand && activeHand.cards.length === 2
                        && activeHand.cards[0].rank === activeHand.cards[1].rank
-                       && state.bankroll >= activeHand.bet
-                       && seat.hands.length < 4;
-  const canSurrender = !!activeHand && activeHand.cards.length === 2;
+                       && state.bankroll >= activeHand.bet && seat.hands.length < 4;
 
-  // Empty seat
+  // Late surrender: first 2 cards only, not after a split
+  const canSurrender = !!activeHand && activeHand.cards.length === 2 && !activeHand.isSplit;
+
+  const origin = cardDealOrigin(seatXPct);
+
+  // ── EMPTY SEAT ───────────────────────────────────────────────────────────
   if (!seat.isActive) {
     if (!isBettingPhase) return null;
+    // Sit button is itself anchored at the arc point via translate(-50%,-50%)
     return (
-      <motion.button
-        data-testid={`button-sit-${seatIndex}`}
-        onClick={() => {
-          dispatch({ type: 'SIT', seatId: seatIndex });
-          dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
-        }}
-        initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-        whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}
-        style={{
-          width: 66, height: 66, borderRadius: '50%',
-          border: '2px dashed rgba(255,255,255,0.28)',
-          background: 'rgba(0,0,0,0.18)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: 'rgba(255,255,255,0.38)', gap: 1,
-        }}
-      >
-        <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
-        <span style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>Sit</span>
-      </motion.button>
+      <div style={{ position: 'relative', width: 0, height: 0 }}>
+        <motion.button
+          data-testid={`button-sit-${seatIndex}`}
+          onClick={() => {
+            dispatch({ type: 'SIT', seatId: seatIndex });
+            dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
+          }}
+          initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+          whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}
+          style={{
+            position: 'absolute',
+            top: -33, left: -33,           // center the 66×66 button on (0,0)
+            width: 66, height: 66, borderRadius: '50%',
+            border: '2px dashed rgba(255,255,255,0.28)',
+            background: 'rgba(0,0,0,0.18)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: 'rgba(255,255,255,0.38)', gap: 1,
+          }}
+        >
+          <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
+          <span style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>Sit</span>
+        </motion.button>
+      </div>
     );
   }
 
+  // ── ACTIVE SEAT ──────────────────────────────────────────────────────────
+  // All children are absolutely positioned relative to the 0×0 anchor (arc point).
+  // Arc point = centre of the bet circle.
+  // Cards zone:   bottom:40 → bottom of card area is 40px above arc centre
+  // Bet circle:   top:-33, left:-33 → 66×66 centred on arc
+  // Below zone:   top:40 → top of buttons/side-bets is 40px below arc centre
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative' }}>
+    <div style={{ position: 'relative', width: 0, height: 0 }}>
 
-      {/* Insurance prompt */}
-      {isInsurance && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{
-          position: 'absolute', bottom: '108%', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(4,8,5,0.97)', border: '1px solid rgba(212,168,32,0.5)',
-          borderRadius: 8, padding: '10px 14px', textAlign: 'center',
-          zIndex: 50, minWidth: 140, boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
-        }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#d4a820', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max ${Math.floor(currentBet / 2)}</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={() => dispatch({ type: 'INSURANCE' })}
-              style={{ flex: 1, padding: '4px 0', background: '#d4a820', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>
-              Buy
-            </button>
-            <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })}
-              style={{ flex: 1, padding: '4px 0', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', fontWeight: 700, fontSize: 10, borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', fontFamily: 'sans-serif' }}>
-              Skip
-            </button>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Player hands */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+      {/* ── CARDS ZONE (above bet circle) ── */}
+      <div style={{
+        position: 'absolute',
+        bottom: 40,              // bottom of this div = 40px above arc centre
+        left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', gap: 6, alignItems: 'flex-end',
+        pointerEvents: 'none',
+      }}>
         {seat.hands.map((hand: Hand, hIdx: number) => {
           const isThisHand = isPlayerTurn && seat.activeHandIndex === hIdx;
           const val = calculateHandValue(hand.cards);
-          const handW = hand.cards.length <= 1 ? 62 : 62 + (hand.cards.length - 1) * 17;
-          const handH = hand.cards.length <= 1 ? 88 : 88 + (hand.cards.length - 1) * 17;
+          const handW = Math.max(62, 62 + (hand.cards.length - 1) * 17);
+          const handH = Math.max(88, 88 + (hand.cards.length - 1) * 17);
 
           return (
             <div key={hand.id} style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
               opacity: state.phase === 'PLAYER_TURN' && !isThisHand ? 0.55 : 1,
               transition: 'opacity 0.25s',
+              pointerEvents: 'auto',
             }}>
-              {/* Result badge */}
+              {/* Result toast — dramatic animated badge */}
               <AnimatePresence>
-                {hand.result && (
-                  <motion.div key={`res-${hand.id}`}
-                    initial={{ opacity: 0, scale: 0.5, y: 6 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-                    style={{
-                      padding: '3px 9px', borderRadius: 4,
-                      fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
-                      textTransform: 'uppercase', fontFamily: 'sans-serif', whiteSpace: 'nowrap',
-                      ...(hand.result === 'blackjack_win'
-                        ? { background: 'rgba(212,168,32,0.92)', color: '#000', border: '1px solid #d4a820' }
-                        : hand.result === 'win'
-                        ? { background: 'rgba(22,105,50,0.92)', color: '#fff', border: '1px solid rgba(40,160,80,0.5)' }
-                        : hand.result === 'push'
-                        ? { background: 'rgba(70,70,70,0.92)', color: '#ddd', border: '1px solid rgba(140,140,140,0.4)' }
-                        : hand.result === 'surrender'
-                        ? { background: 'rgba(130,85,10,0.92)', color: '#fff', border: '1px solid rgba(180,140,40,0.5)' }
-                        : { background: 'rgba(115,18,18,0.92)', color: '#fff', border: '1px solid rgba(200,50,50,0.4)' }),
-                    }}>
-                    {hand.result === 'blackjack_win'
-                      ? '♠ BLACKJACK'
-                      : hand.result === 'win'
-                      ? `WIN +$${hand.payout ?? hand.bet}`
-                      : hand.result === 'push'
-                      ? 'PUSH'
-                      : hand.result === 'surrender'
-                      ? 'SURRENDER'
-                      : hand.result === 'bust'
-                      ? 'BUST'
-                      : `LOSE -$${hand.bet}`}
-                  </motion.div>
-                )}
+                {hand.result && (() => {
+                  const isBJ  = hand.result === 'blackjack_win';
+                  const isWin = hand.result === 'win' || isBJ;
+                  const isPush = hand.result === 'push';
+                  const isSurrender = hand.result === 'surrender';
+                  const isBust = hand.result === 'bust';
+                  const label = isBJ         ? '♠ BLACKJACK!'
+                    : isWin                  ? `+$${hand.payout ?? hand.bet}`
+                    : isPush                 ? 'PUSH'
+                    : isSurrender            ? 'SURRENDER'
+                    : isBust                 ? 'BUST'
+                    : `-$${hand.bet}`;
+                  const colors = isBJ
+                    ? { bg: 'linear-gradient(135deg,#b8860b,#ffd700,#b8860b)', color: '#000', border: '#ffd700', glow: 'rgba(255,215,0,0.7)', fs: 13 }
+                    : isWin
+                    ? { bg: 'linear-gradient(135deg,#0d5c26,#1db954,#0d5c26)', color: '#fff', border: '#1db954', glow: 'rgba(29,185,84,0.5)', fs: 12 }
+                    : isPush
+                    ? { bg: 'rgba(55,55,55,0.95)', color: '#ccc', border: 'rgba(150,150,150,0.4)', glow: 'none', fs: 11 }
+                    : isSurrender
+                    ? { bg: 'rgba(110,70,10,0.95)', color: '#f0c060', border: 'rgba(200,150,40,0.5)', glow: 'none', fs: 10 }
+                    : { bg: 'linear-gradient(135deg,#6b0f0f,#c0392b,#6b0f0f)', color: '#fff', border: '#c0392b', glow: 'rgba(192,57,43,0.5)', fs: 12 };
+                  return (
+                    <motion.div
+                      key={`res-${hand.id}`}
+                      initial={
+                        isBJ    ? { opacity: 0, scale: 0.3, y: 12, rotate: -8 }
+                        : isWin ? { opacity: 0, scale: 0.5, y: 8 }
+                        : isPush ? { opacity: 0, x: -20 }
+                        : isBust ? { opacity: 0, scale: 1.4, y: -4 }
+                        : { opacity: 0, scale: 0.6, y: 6 }
+                      }
+                      animate={
+                        isBJ    ? { opacity: 1, scale: [0.3,1.22,1], y: 0, rotate: 0 }
+                        : isWin ? { opacity: 1, scale: [0.5,1.12,1], y: 0 }
+                        : isPush ? { opacity: 1, x: 0 }
+                        : isBust ? { opacity: 1, scale: [1.4,0.92,1], y: 0 }
+                        : { opacity: 1, scale: 1, y: 0 }
+                      }
+                      transition={
+                        isBJ || isWin
+                          ? { type: 'spring', stiffness: 320, damping: 20 }
+                          : { duration: 0.3, ease: 'easeOut' }
+                      }
+                      style={{
+                        padding: isBJ ? '5px 14px' : '3px 10px',
+                        borderRadius: 5,
+                        fontSize: colors.fs,
+                        fontWeight: 800,
+                        letterSpacing: isBJ ? '0.12em' : '0.08em',
+                        textTransform: 'uppercase',
+                        fontFamily: 'sans-serif',
+                        whiteSpace: 'nowrap',
+                        background: colors.bg,
+                        color: colors.color,
+                        border: `1px solid ${colors.border}`,
+                        boxShadow: colors.glow !== 'none'
+                          ? `0 0 16px ${colors.glow}, 0 2px 8px rgba(0,0,0,0.6)`
+                          : '0 2px 6px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      {label}
+                    </motion.div>
+                  );
+                })()}
               </AnimatePresence>
 
-              {/* Cards */}
+              {/* Card fan */}
               <div style={{ position: 'relative', width: handW, height: handH }}>
                 {hand.cards.map((card: Card, cIdx: number) => (
                   <motion.div
                     key={cIdx}
-                    initial={{ x: 90, y: -80, opacity: 0, rotate: 18 }}
+                    // Cards fly in FROM the shoe position (upper-right) to their
+                    // stacked rest position. Leftmost seats have a larger x offset
+                    // (shoe is further right relative to them) — this makes the
+                    // right-to-left dealing order visually obvious.
+                    initial={{ x: origin.x - cIdx * 17, y: origin.y, opacity: 0, rotate: -12 }}
                     animate={{ x: cIdx * 17, y: 0, opacity: 1, rotate: 0 }}
-                    transition={{ delay: cIdx * 0.07, type: 'spring', stiffness: 280, damping: 26 }}
+                    transition={{ type: 'tween', duration: 0.38, ease: 'easeOut' }}
                     style={{ position: 'absolute', top: 0 }}
                   >
                     <PlayingCard card={card} />
@@ -536,14 +604,14 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
                 ))}
               </div>
 
-              {/* Value badge */}
+              {/* Hand value badge */}
               {hand.cards.length > 0 && (
                 <div style={{
-                  background: 'rgba(0,0,0,0.7)',
+                  background: 'rgba(0,0,0,0.72)',
                   border: `1px solid ${isThisHand ? 'rgba(212,168,32,0.75)' : 'rgba(255,255,255,0.13)'}`,
                   borderRadius: 12, padding: '2px 8px',
                   fontSize: 11, fontWeight: 700, fontFamily: 'sans-serif',
-                  color: val.total > 21 ? '#e05050' : val.total === 21 ? '#d4a820' : 'rgba(255,255,255,0.8)',
+                  color: val.total > 21 ? '#e05050' : val.total === 21 ? '#d4a820' : 'rgba(255,255,255,0.82)',
                 }}>
                   {val.total}{val.soft && val.total < 21 ? `/${val.total - 10}` : ''}{val.total > 21 ? ' bust' : ''}
                 </div>
@@ -553,26 +621,66 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
         })}
       </div>
 
-      {/* Side-bet win badges */}
+      {/* Side-bet wins: chip burst + label, anchored just above bet circle */}
       <AnimatePresence>
         {(seat.sideBetResults || []).filter((r: any) => r.win).map((res: any, idx: number) => (
-          <motion.div key={`sbr-${idx}`} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-            style={{ fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#d4a820', fontFamily: 'sans-serif', fontWeight: 700 }}>
-            {res.betName} +${res.payout}
+          <motion.div
+            key={`sbr-${idx}`}
+            initial={{ opacity: 0, y: 0 }}
+            animate={{ opacity: [0, 1, 1, 0], y: [0, -30, -55, -80] }}
+            transition={{ duration: 1.8, delay: idx * 0.18, times: [0, 0.1, 0.75, 1] }}
+            style={{
+              position: 'absolute',
+              bottom: 40,
+              left: '50%', transform: 'translateX(-50%)',
+              zIndex: 80, pointerEvents: 'none',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            }}
+          >
+            {/* Flying chips burst from bet circle */}
+            <ChipBurst amount={res.payout} />
+            {/* Label */}
+            <div style={{
+              background: 'linear-gradient(135deg,#8b6914,#d4a820,#8b6914)',
+              borderRadius: 4, padding: '2px 8px',
+              fontSize: 9, fontWeight: 800, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: '#000',
+              fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+              boxShadow: '0 0 10px rgba(212,168,32,0.6)',
+            }}>
+              {res.betName} +${res.payout}
+            </div>
           </motion.div>
         ))}
       </AnimatePresence>
 
-      {/* ── BET CIRCLE ── */}
+      {/* ── BET CIRCLE (anchored at arc point) ── */}
+      {/* Insurance prompt floats above the circle */}
+      {isInsurance && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{
+          position: 'absolute', bottom: 40 + 8,
+          left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(4,8,5,0.97)', border: '1px solid rgba(212,168,32,0.5)',
+          borderRadius: 8, padding: '10px 14px', textAlign: 'center',
+          zIndex: 50, minWidth: 140, boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
+        }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#d4a820', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max ${Math.floor(currentBet / 2)}</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => dispatch({ type: 'INSURANCE' })}
+              style={{ flex: 1, padding: '4px 0', background: '#d4a820', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>Buy</button>
+            <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })}
+              style={{ flex: 1, padding: '4px 0', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', fontWeight: 700, fontSize: 10, borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', fontFamily: 'sans-serif' }}>Skip</button>
+          </div>
+        </motion.div>
+      )}
+
       <motion.div
         data-testid={`seat-${seatIndex}`}
         onClick={() => {
           if (state.phase === 'BETTING') {
-            // Select this seat and add a chip with every click
             if (!isSelectedBet) dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
             dispatch({ type: 'PLACE_BET', seatId: seatIndex, amount: selectedChip });
-          } else if (state.phase === 'SEAT_SELECTION') {
-            dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
           }
         }}
         animate={{
@@ -583,11 +691,13 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
             : '0 0 0 2px rgba(255,255,255,0.14)',
         }}
         style={{
+          position: 'absolute',
+          top: -33, left: -33,           // 66×66 circle centred on arc point
           width: 66, height: 66, borderRadius: '50%',
-          background: isPlayerTurn ? 'rgba(212,168,32,0.1)' : 'rgba(0,0,0,0.3)',
+          background: isPlayerTurn ? 'rgba(212,168,32,0.1)' : 'rgba(0,0,0,0.32)',
           cursor: state.phase === 'BETTING' ? 'pointer' : 'default',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          position: 'relative', transition: 'background 0.2s',
+          transition: 'background 0.2s',
         }}
       >
         {currentBet > 0 ? <ChipStack amount={currentBet} /> : (
@@ -595,67 +705,73 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip }: {
             {state.phase === 'BETTING' ? 'Tap' : 'Bet'}
           </span>
         )}
-
-        {/* Insurance indicator */}
         {((seat.sideBets as any).insurance > 0) && (
-          <div style={{
-            position: 'absolute', top: -6, right: -6,
-            width: 20, height: 20, borderRadius: '50%',
-            background: '#112299', border: '1px solid #4466ee',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 7, color: '#fff', fontWeight: 700, fontFamily: 'sans-serif',
-          }}>IN</div>
+          <div style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#112299', border: '1px solid #4466ee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, color: '#fff', fontWeight: 700, fontFamily: 'sans-serif' }}>IN</div>
         )}
-
-        {/* Active pulse dot */}
         {isPlayerTurn && (
           <motion.div animate={{ scale: [1, 1.4, 1] }} transition={{ repeat: Infinity, duration: 1.4 }}
-            style={{ position: 'absolute', bottom: -10, width: 7, height: 7, borderRadius: '50%', background: '#d4a820' }}
-          />
+            style={{ position: 'absolute', bottom: -11, width: 7, height: 7, borderRadius: '50%', background: '#d4a820' }} />
         )}
       </motion.div>
 
-      {/* ── SIDE BET BUTTONS (on the felt, under bet circle, during BETTING) ── */}
-      {isBettingPhase && isSelectedBet && config.sideBets.filter(s => s !== 'insurance').length > 0 && (
-        <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-          style={{ display: 'flex', flexWrap: 'wrap', gap: 3, justifyContent: 'center', maxWidth: 160, marginTop: 3 }}>
+      {/* ── BELOW ZONE: side bets (betting) or action buttons (player turn) ── */}
+
+      {/* Side bet chips — always visible on every active seat during betting.
+          Selected seat shows full-size chips; other seats show compact ones. */}
+      {isBettingPhase && config.sideBets.filter(s => s !== 'insurance').length > 0 && (
+        <div
+          style={{
+            position: 'absolute', top: 44,
+            left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', flexWrap: 'wrap', gap: isSelectedBet ? 6 : 4,
+            justifyContent: 'center',
+            width: isSelectedBet ? 220 : 170,
+            zIndex: 25,
+          }}
+        >
           {config.sideBets.filter(s => s !== 'insurance').map(sb => {
             const placed = (seat.sideBets as any)[sb] ?? 0;
             return (
-              <button key={sb}
-                data-testid={`sidebet-${sb}`}
-                onClick={() => dispatch({ type: 'PLACE_SIDE_BET', seatId: seatIndex, betType: sb as keyof SideBets, amount: selectedChip })}
-                style={{
-                  padding: '3px 7px', fontSize: 8, letterSpacing: '0.08em', textTransform: 'uppercase',
-                  fontWeight: 700, fontFamily: 'sans-serif',
-                  background: placed > 0 ? 'rgba(212,168,32,0.22)' : 'rgba(0,0,0,0.4)',
-                  border: placed > 0 ? '1px solid rgba(212,168,32,0.6)' : '1px solid rgba(255,255,255,0.18)',
-                  borderRadius: 4, color: placed > 0 ? '#d4a820' : 'rgba(255,255,255,0.45)',
-                  cursor: 'pointer',
+              <div key={sb} data-testid={`sidebet-${sb}`}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                  // Fade slightly when not selected seat, but still fully interactive
+                  opacity: isSelectedBet ? 1 : 0.72,
+                  transform: isSelectedBet ? 'scale(1)' : 'scale(0.82)',
+                  transition: 'opacity 0.2s, transform 0.2s',
                 }}>
-                {SIDE_BET_LABELS[sb] || sb}{placed > 0 ? ` $${placed}` : ''}
-              </button>
+                <SideBetChip
+                  label={SIDE_BET_LABELS[sb] || sb}
+                  amount={placed}
+                  onClick={() => {
+                    // Clicking a side bet on any seat selects it + places the bet
+                    if (!isSelectedBet) dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
+                    dispatch({ type: 'PLACE_SIDE_BET', seatId: seatIndex, betType: sb as keyof SideBets, amount: selectedChip });
+                  }}
+                />
+              </div>
             );
           })}
-        </motion.div>
+        </div>
       )}
 
-      {/* ── ACTION BUTTONS (on the felt, below seat, during PLAYER_TURN) ── */}
+      {/* Action buttons — appear below circle on player's turn, hidden on natural BJ */}
       <AnimatePresence>
-        {isPlayerTurn && (
+        {isPlayerTurn && !hasNaturalBJ && (
           <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.9 }}
+            initial={{ opacity: 0, y: -6, scale: 0.92 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.9 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, marginTop: 6 }}
+            exit={{ opacity: 0, y: -6, scale: 0.92 }}
+            transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+            style={{
+              position: 'absolute', top: 40,
+              left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+            }}
           >
-            {/* Primary: Hit & Stand always visible */}
             <div style={{ display: 'flex', gap: 4 }}>
               <button data-testid="button-hit"   onClick={() => dispatch({ type: 'HIT' })}   style={feltActionBtn(false, true)}>Hit</button>
               <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND' })} style={feltActionBtn(false, false)}>Stand</button>
             </div>
-            {/* Secondary: conditional options */}
             <div style={{ display: 'flex', gap: 4 }}>
               <button data-testid="button-double"    onClick={() => canDouble    && dispatch({ type: 'DOUBLE' })}    style={feltActionBtn(!canDouble,    false)}>Double</button>
               <button data-testid="button-split"     onClick={() => canSplit     && dispatch({ type: 'SPLIT' })}     style={feltActionBtn(!canSplit,     false)}>Split</button>
@@ -681,25 +797,21 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
 
   return (
     <div style={{
-      height: 100, flexShrink: 0,
+      height: 118, flexShrink: 0,
       background: 'rgba(1,4,2,0.98)',
       borderTop: '1px solid rgba(140,100,25,0.16)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 16px', gap: 10, zIndex: 30,
     }}>
 
-      {/* Bankroll */}
-      <div style={{ minWidth: 110, flexShrink: 0 }}>
+      {/* Bankroll — animated chip stack */}
+      <div style={{ minWidth: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.3)', fontFamily: 'sans-serif' }}>{playerName}</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: '#d4a820', fontFamily: 'sans-serif', letterSpacing: '-0.01em', marginTop: 2 }}>
-          ${state.bankroll.toLocaleString()}
-        </div>
-        {state.bankroll < config.minBet && isBettingPhase && (
-          <button onClick={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
-            style={{ marginTop: 4, fontSize: 9, color: '#d4a820', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', background: 'none', border: '1px solid rgba(212,168,32,0.4)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontFamily: 'sans-serif' }}>
-            +$1,000
-          </button>
-        )}
+        <BankrollStack
+          amount={state.bankroll}
+          low={state.bankroll < config.minBet && isBettingPhase}
+          onAddFunds={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
+        />
       </div>
 
       {/* Center: chip tray + deal */}

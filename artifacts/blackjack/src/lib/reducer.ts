@@ -176,13 +176,16 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
         return s;
       }
+      // Peek on 10-value: if dealer has BJ go straight to settlement
       if (upcard?.value === 10 && isBlackjack(s.dealerCards)) {
         s.dealerStatus = 'blackjack';
         s.phase = 'SETTLEMENT';
         return s;
       }
+      // Auto-stand all natural BJ hands before player turn starts
+      s.seats = autoStandBlackjacks(s.seats);
       s.phase = 'PLAYER_TURN';
-      s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
+      s.activeSeatIndex = findRightmostActive(s.seats);
       if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
       return checkAllDone(s);
     }
@@ -233,7 +236,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       const hi = seat.activeHandIndex;
       const hand = seat.hands[hi];
-      if (s.bankroll < hand.bet || hand.cards.length !== 2) return s;
+      // Double allowed on any number of cards (any-double rule), bankroll must cover extra bet
+      if (s.bankroll < hand.bet) return s;
 
       s.bankroll -= hand.bet;
       const card = s.shoe.pop();
@@ -521,7 +525,38 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Rightmost seat that still has a hand in 'playing' status. */
+function findRightmostActive(seats: Seat[]): number {
+  for (let i = seats.length - 1; i >= 0; i--) {
+    if (seats[i].isActive && seats[i].hands.some(h => h.status === 'playing')) return i;
+  }
+  return -1;
+}
+
+/**
+ * Auto-stand every non-split natural blackjack (2-card 21).
+ * Called before entering PLAYER_TURN so the active-seat search skips them.
+ */
+function autoStandBlackjacks(seats: Seat[]): Seat[] {
+  return seats.map(seat => {
+    if (!seat.isActive) return seat;
+    const hands = seat.hands.map(hand => {
+      if (
+        hand.status === 'playing' &&
+        !hand.isSplit &&
+        hand.cards.length === 2 &&
+        calculateHandValue(hand.cards).total === 21
+      ) {
+        return { ...hand, status: 'stood' as const };
+      }
+      return hand;
+    });
+    return { ...seat, hands };
+  });
+}
+
 function moveToNextInsurance(state: GameState): GameState {
+  // Insurance offered left→right (standard), so increment
   let next = state.activeSeatIndex + 1;
   while (next < state.seats.length) {
     if (state.seats[next].isActive && state.seats[next].hands.length > 0) {
@@ -533,8 +568,10 @@ function moveToNextInsurance(state: GameState): GameState {
   if (isBlackjack(state.dealerCards)) {
     return { ...state, dealerStatus: 'blackjack', phase: 'SETTLEMENT' } as any;
   }
+  // Auto-stand natural BJ hands, then start player turn from rightmost
   const s = { ...state, phase: 'PLAYER_TURN' } as GameState;
-  s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
+  s.seats = autoStandBlackjacks(s.seats) as any;
+  s.activeSeatIndex = findRightmostActive(s.seats);
   if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
   return checkAllDone(s);
 }
@@ -551,19 +588,18 @@ function moveToNextHand(state: GameState): GameState {
   const s = { ...state, seats: [...state.seats] };
   const seat = s.seats[s.activeSeatIndex];
 
-  // Try next hand in same seat
+  // Try next hand in same seat (split hands go left→right within a seat)
   if (seat && seat.activeHandIndex < seat.hands.length - 1) {
     const newIdx = seat.activeHandIndex + 1;
     const nextHand = seat.hands[newIdx];
     s.seats[s.activeSeatIndex] = { ...seat, activeHandIndex: newIdx };
-
     if (nextHand.status !== 'playing') return moveToNextHand(s);
     return s;
   }
 
-  // Try next active seat
-  let nextSeat = s.activeSeatIndex + 1;
-  while (nextSeat < s.seats.length) {
+  // Move to next seat going RIGHT → LEFT (decrement index)
+  let nextSeat = s.activeSeatIndex - 1;
+  while (nextSeat >= 0) {
     if (s.seats[nextSeat].isActive && s.seats[nextSeat].hands.length > 0) {
       s.activeSeatIndex = nextSeat;
       s.seats[nextSeat] = { ...s.seats[nextSeat], activeHandIndex: 0 };
@@ -571,7 +607,7 @@ function moveToNextHand(state: GameState): GameState {
       if (firstHand.status !== 'playing') return moveToNextHand(s);
       return s;
     }
-    nextSeat++;
+    nextSeat--;
   }
 
   // All hands done → dealer
