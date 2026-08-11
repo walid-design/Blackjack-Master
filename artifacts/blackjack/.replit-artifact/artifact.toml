@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Blackjack Casino"
+description = "A full-featured Blackjack casino web app with multiple tables, side bets (Perfect Pairs, 21+3, Insurance, Lucky Ladies, Super Sevens, Lucky Lucky), multi-seat play, split/double/surrender logic, configurable decks, and live bankroll management."
+version = "1.0.0"
+id = "artifacts/blackjack"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20963
+
+[services.development]
+run = "pnpm --filter @workspace/blackjack run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/blackjack", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/blackjack/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20963"
+BASE_PATH = "/"
