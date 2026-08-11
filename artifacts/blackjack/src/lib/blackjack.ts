@@ -47,7 +47,7 @@ export interface Seat {
   sideBetResults: SideBetResult[];
 }
 
-export type GamePhase = 'SEAT_SELECTION' | 'BETTING' | 'DEALING' | 'INSURANCE' | 'PLAYER_TURN' | 'DEALER_TURN' | 'SETTLEMENT';
+export type GamePhase = 'SEAT_SELECTION' | 'BETTING' | 'DEALING' | 'SPLIT_DEALING' | 'INSURANCE' | 'PLAYER_TURN' | 'DEALER_TURN' | 'SETTLEMENT';
 
 export interface TableConfig {
   id: string;

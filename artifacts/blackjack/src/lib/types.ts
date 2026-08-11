@@ -12,6 +12,8 @@ export interface GameState {
   needsShuffle: boolean;
   bankroll: number;
   bettingSeatId?: number;
+  /** Set during SPLIT_DEALING — which hand index within activeSeatIndex gets the next card */
+  splitCardTarget?: number;
 }
 
 export type GameAction =
@@ -30,6 +32,7 @@ export type GameAction =
   | { type: 'STAND' }
   | { type: 'DOUBLE' }
   | { type: 'SPLIT' }
+  | { type: 'SPLIT_CARD' }
   | { type: 'SURRENDER' }
   | { type: 'INSURANCE' }
   | { type: 'DECLINE_INSURANCE' }

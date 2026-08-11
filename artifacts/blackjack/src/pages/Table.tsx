@@ -12,13 +12,27 @@ import { Chip, ChipStack, SideBetChip, BankrollStack, ChipBurst } from '@/compon
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// Parabolic arc: center seat lowest (closest to player), sides arc up
-function getSeatPositions(n: number): Array<{ x: number; y: number }> {
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const fn = () => setMobile(window.innerWidth < 640);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
+  return mobile;
+}
+
+// Parabolic arc — tighter x-spread on mobile to prevent crowding
+function getSeatPositions(n: number, mobile = false): Array<{ x: number; y: number }> {
   return Array.from({ length: n }, (_, i) => {
     const t = n === 1 ? 0.5 : i / (n - 1);
-    const x = 8 + t * 84;
+    const xMin = mobile ? 12 : 8;
+    const xRange = mobile ? 76 : 84;
+    const x = xMin + t * xRange;
     const tNorm = (t - 0.5) * 2;
-    const y = 79 - 9 * tNorm * tNorm;
+    const yBase = mobile ? 77 : 79;
+    const yCurve = mobile ? 6 : 9;
+    const y = yBase - yCurve * tNorm * tNorm;
     return { x, y };
   });
 }
@@ -40,6 +54,7 @@ interface DealerHistoryEntry { total: number; bust: boolean; bj: boolean }
 export default function Table() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
+  const isMobile = useIsMobile();
   const tableConfig = TABLES.find(t => t.id === id);
 
   const [playerName, setPlayerName] = useState('Player');
@@ -116,6 +131,20 @@ export default function Table() {
     }
   }, [state.phase]);
 
+  // SPLIT_DEALING: deal one card to each split hand 550ms apart
+  const splitDealingRef = useRef(false);
+  useEffect(() => {
+    if (state.phase !== 'SPLIT_DEALING') { splitDealingRef.current = false; return; }
+    if (splitDealingRef.current) return;
+    splitDealingRef.current = true;
+    (async () => {
+      await sleep(550);
+      dispatch({ type: 'SPLIT_CARD' }); // card to hand 0
+      await sleep(550);
+      dispatch({ type: 'SPLIT_CARD' }); // card to hand 1 → transitions to PLAYER_TURN
+    })();
+  }, [state.phase, (state as any).splitCardTarget]);
+
   // Dealer plays after 1.4s pause
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
@@ -133,7 +162,7 @@ export default function Table() {
 
   if (!tableConfig) { setLocation('/'); return null; }
 
-  const seatPositions = getSeatPositions(tableConfig.seats);
+  const seatPositions = getSeatPositions(tableConfig.seats, isMobile);
   const shoeTotal     = tableConfig.decks * 52;
   const shoePct       = Math.round((state.shoe.length / shoeTotal) * 100);
 
@@ -264,7 +293,7 @@ export default function Table() {
           <DealerZone state={state} />
 
           {/* Card shoe */}
-          <CardShoe shoe={state.shoe} decks={tableConfig.decks} />
+          <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
 
           {/* Seats — arc point is the CENTRE of the bet circle; SeatSpot anchors to it */}
           {seatPositions.map(({ x, y }, i) => (
@@ -282,6 +311,7 @@ export default function Table() {
                 selectedChip={selectedChip}
                 seatXPct={x}
                 seatYPct={y}
+                isMobile={isMobile}
               />
             </div>
           ))}
@@ -298,6 +328,7 @@ export default function Table() {
         setSelectedChip={setSelectedChip}
         canDeal={canDeal}
         anyActive={anyActive}
+        isMobile={isMobile}
       />
     </div>
   );
@@ -372,16 +403,20 @@ function DealerZone({ state }: { state: any }) {
 // Card Shoe
 // ─────────────────────────────────────────────────────────────────────────────
 
-function CardShoe({ shoe, decks }: { shoe: Card[]; decks: number }) {
+function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: number; isMobile?: boolean }) {
   const total = decks * 52;
   const visible = Math.max(1, Math.ceil((shoe.length / total) * 12));
+  const w = isMobile ? 36 : 52;
+  const h = isMobile ? 52 : 76;
+  const cw = isMobile ? 32 : 46;
+  const ch = isMobile ? 44 : 64;
   return (
-    <div style={{ position: 'absolute', top: '3.5%', right: '4%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, zIndex: 5 }}>
-      <div style={{ position: 'relative', width: 52, height: 76 }}>
+    <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, zIndex: 5 }}>
+      <div style={{ position: 'relative', width: w, height: h }}>
         {Array.from({ length: visible }).map((_, i) => (
           <div key={i} style={{
             position: 'absolute', top: i * 1.2, left: i % 2 === 0 ? 0 : 1,
-            width: 46, height: 64,
+            width: cw, height: ch,
             background: i % 2 === 0 ? '#0c4020' : '#0a3519',
             border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4,
             boxShadow: '0 1px 2px rgba(0,0,0,0.6)',
@@ -389,12 +424,12 @@ function CardShoe({ shoe, decks }: { shoe: Card[]; decks: number }) {
         ))}
         <div style={{
           position: 'absolute', top: visible * 1.2, left: 2,
-          width: 46, height: 64,
+          width: cw, height: ch,
           background: 'linear-gradient(135deg,#0f5230 0%,#062010 100%)',
           border: '1px solid rgba(255,255,255,0.18)', borderRadius: 4,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <div style={{ width: 30, height: 46, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, opacity: 0.25 }} />
+          <div style={{ width: cw * 0.65, height: ch * 0.72, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, opacity: 0.25 }} />
         </div>
       </div>
       <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.22)', fontFamily: 'sans-serif', letterSpacing: '0.08em' }}>
@@ -425,11 +460,17 @@ function cardDealOrigin(seatXPct: number): { x: number; y: number } {
   };
 }
 
-function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct }: {
+function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, isMobile = false }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
-  seatXPct: number; seatYPct: number;
+  seatXPct: number; seatYPct: number; isMobile?: boolean;
 }) {
+  // Circle radius scales down on mobile — extra step for 7-seat tables
+  const R = isMobile
+    ? (config.seats >= 7 ? 22 : 26)   // 44px on 7-seat, 52px on 5-seat
+    : 33;                               // 66px on desktop
+  const D = R * 2;
+
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
   const isPlayerTurn   = state.phase === 'PLAYER_TURN' && state.activeSeatIndex === seatIndex;
   const isInsurance    = state.phase === 'INSURANCE'   && state.activeSeatIndex === seatIndex;
@@ -472,8 +513,8 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}
           style={{
             position: 'absolute',
-            top: -33, left: -33,           // center the 66×66 button on (0,0)
-            width: 66, height: 66, borderRadius: '50%',
+            top: -R, left: -R,
+            width: D, height: D, borderRadius: '50%',
             border: '2px dashed rgba(255,255,255,0.28)',
             background: 'rgba(0,0,0,0.18)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -621,37 +662,110 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         })}
       </div>
 
-      {/* Side-bet wins: chip burst + label, anchored just above bet circle */}
+      {/* ── SIDE BET WIN DISPLAY ────────────────────────────────────────────── */}
+
+      {/* IMMEDIATE wins (paid at start of PLAYER_TURN):
+          1. Flying chip burst fires once when result first appears.
+          2. Persistent gold badge stays throughout the player's entire turn. */}
       <AnimatePresence>
-        {(seat.sideBetResults || []).filter((r: any) => r.win).map((res: any, idx: number) => (
+        {(seat.sideBetResults || [])
+          .filter((r: any) => r.win && r.immediate)
+          .map((res: any, idx: number) => (
+            <motion.div
+              key={`sbr-imm-${idx}`}
+              initial={{ opacity: 0, y: 0 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              style={{
+                position: 'absolute',
+                bottom: 40,
+                left: '50%', transform: 'translateX(-50%)',
+                zIndex: 80, pointerEvents: 'none',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+              }}
+            >
+              {/* Chip burst fires once on entry */}
+              <ChipBurst amount={res.payout} />
+            </motion.div>
+          ))}
+      </AnimatePresence>
+
+      {/* Persistent "BONUS PAID" badge — stays visible during PLAYER_TURN */}
+      {(() => {
+        const immWins = (seat.sideBetResults || []).filter((r: any) => r.win && r.immediate);
+        if (immWins.length === 0) return null;
+        // Show during player turn (before settlement)
+        const visible = state.phase === 'PLAYER_TURN' || state.phase === 'DEALER_TURN';
+        if (!visible) return null;
+        return (
           <motion.div
-            key={`sbr-${idx}`}
-            initial={{ opacity: 0, y: 0 }}
-            animate={{ opacity: [0, 1, 1, 0], y: [0, -30, -55, -80] }}
-            transition={{ duration: 1.8, delay: idx * 0.18, times: [0, 0.1, 0.75, 1] }}
+            initial={{ opacity: 0, scale: 0.8, y: -10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
             style={{
               position: 'absolute',
-              bottom: 40,
+              bottom: 40 + 180,   // float high above the cards
               left: '50%', transform: 'translateX(-50%)',
-              zIndex: 80, pointerEvents: 'none',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              zIndex: 60,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+              pointerEvents: 'none',
             }}
           >
-            {/* Flying chips burst from bet circle */}
-            <ChipBurst amount={res.payout} />
-            {/* Label */}
             <div style={{
-              background: 'linear-gradient(135deg,#8b6914,#d4a820,#8b6914)',
-              borderRadius: 4, padding: '2px 8px',
-              fontSize: 9, fontWeight: 800, letterSpacing: '0.1em',
-              textTransform: 'uppercase', color: '#000',
-              fontFamily: 'sans-serif', whiteSpace: 'nowrap',
-              boxShadow: '0 0 10px rgba(212,168,32,0.6)',
-            }}>
-              {res.betName} +${res.payout}
-            </div>
+              fontSize: 8, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: 'rgba(212,168,32,0.65)', fontFamily: 'sans-serif', marginBottom: 1,
+            }}>Bonus Paid ✓</div>
+            {immWins.map((res: any, i: number) => (
+              <motion.div
+                key={i}
+                animate={{ boxShadow: ['0 0 8px rgba(212,168,32,0.4)', '0 0 20px rgba(212,168,32,0.8)', '0 0 8px rgba(212,168,32,0.4)'] }}
+                transition={{ repeat: Infinity, duration: 2, delay: i * 0.3 }}
+                style={{
+                  background: 'linear-gradient(135deg,#7a5a0e,#d4a820,#7a5a0e)',
+                  borderRadius: 5, padding: '4px 12px',
+                  fontSize: 10, fontWeight: 800, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: '#000',
+                  fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+                }}
+              >
+                {res.betName}  +${res.payout}
+              </motion.div>
+            ))}
           </motion.div>
-        ))}
+        );
+      })()}
+
+      {/* SETTLEMENT wins (Super Sevens, Bust It, Insurance — end-of-round only):
+          Flying chip burst + label when settlement results appear */}
+      <AnimatePresence>
+        {(seat.sideBetResults || [])
+          .filter((r: any) => r.win && !r.immediate)
+          .map((res: any, idx: number) => (
+            <motion.div
+              key={`sbr-end-${idx}`}
+              initial={{ opacity: 0, y: 0 }}
+              animate={{ opacity: [0, 1, 1, 0], y: [0, -30, -55, -80] }}
+              transition={{ duration: 1.8, delay: idx * 0.18, times: [0, 0.1, 0.75, 1] }}
+              style={{
+                position: 'absolute',
+                bottom: 40,
+                left: '50%', transform: 'translateX(-50%)',
+                zIndex: 80, pointerEvents: 'none',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              }}
+            >
+              <ChipBurst amount={res.payout} />
+              <div style={{
+                background: 'linear-gradient(135deg,#8b6914,#d4a820,#8b6914)',
+                borderRadius: 4, padding: '2px 8px',
+                fontSize: 9, fontWeight: 800, letterSpacing: '0.1em',
+                textTransform: 'uppercase', color: '#000',
+                fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+                boxShadow: '0 0 10px rgba(212,168,32,0.6)',
+              }}>
+                {res.betName}  +${res.payout}
+              </div>
+            </motion.div>
+          ))}
       </AnimatePresence>
 
       {/* ── BET CIRCLE (anchored at arc point) ── */}
@@ -692,8 +806,8 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         }}
         style={{
           position: 'absolute',
-          top: -33, left: -33,           // 66×66 circle centred on arc point
-          width: 66, height: 66, borderRadius: '50%',
+          top: -R, left: -R,
+          width: D, height: D, borderRadius: '50%',
           background: isPlayerTurn ? 'rgba(212,168,32,0.1)' : 'rgba(0,0,0,0.32)',
           cursor: state.phase === 'BETTING' ? 'pointer' : 'default',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -716,16 +830,18 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 
       {/* ── BELOW ZONE: side bets (betting) or action buttons (player turn) ── */}
 
-      {/* Side bet chips — always visible on every active seat during betting.
-          Selected seat shows full-size chips; other seats show compact ones. */}
-      {isBettingPhase && config.sideBets.filter(s => s !== 'insurance').length > 0 && (
+      {/* Side bet chips:
+          Desktop — all seated spots show them (selected=full, others=compact).
+          Mobile   — ONLY the selected seat shows them to avoid cramped overflow. */}
+      {isBettingPhase && config.sideBets.filter(s => s !== 'insurance').length > 0 &&
+       (!isMobile || isSelectedBet) && (
         <div
           style={{
-            position: 'absolute', top: 44,
+            position: 'absolute', top: R + 10,
             left: '50%', transform: 'translateX(-50%)',
             display: 'flex', flexWrap: 'wrap', gap: isSelectedBet ? 6 : 4,
             justifyContent: 'center',
-            width: isSelectedBet ? 220 : 170,
+            width: isSelectedBet ? (isMobile ? 200 : 220) : 170,
             zIndex: 25,
           }}
         >
@@ -734,7 +850,6 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
             return (
               <div key={sb} data-testid={`sidebet-${sb}`}
                 style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                  // Fade slightly when not selected seat, but still fully interactive
                   opacity: isSelectedBet ? 1 : 0.72,
                   transform: isSelectedBet ? 'scale(1)' : 'scale(0.82)',
                   transition: 'opacity 0.2s, transform 0.2s',
@@ -743,7 +858,6 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                   label={SIDE_BET_LABELS[sb] || sb}
                   amount={placed}
                   onClick={() => {
-                    // Clicking a side bet on any seat selects it + places the bet
                     if (!isSelectedBet) dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
                     dispatch({ type: 'PLACE_SIDE_BET', seatId: seatIndex, betType: sb as keyof SideBets, amount: selectedChip });
                   }}
@@ -763,7 +877,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
             exit={{ opacity: 0, y: -6, scale: 0.92 }}
             transition={{ type: 'spring', stiffness: 340, damping: 28 }}
             style={{
-              position: 'absolute', top: 40,
+              position: 'absolute', top: R + 8,
               left: '50%', transform: 'translateX(-50%)',
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
             }}
@@ -788,13 +902,88 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 // Control Bar (simplified — chip tray + deal/next-round only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, anyActive }: {
+function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, anyActive, isMobile = false }: {
   state: any; dispatch: any; playerName: string; config: TableConfig;
   selectedChip: number; setSelectedChip: (n: number) => void;
-  canDeal: boolean; anyActive: boolean;
+  canDeal: boolean; anyActive: boolean; isMobile?: boolean;
 }) {
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
+  // Mobile chip sizes: slightly smaller to fit 5 chips in a row
+  const chipSize     = isMobile ? 38 : 42;
+  const chipSelected = isMobile ? 44 : 50;
 
+  if (isMobile) {
+    // ── MOBILE LAYOUT ─────────────────────────────────────────────────────
+    // Two rows: [bankroll · status] and [chip tray · action button]
+    return (
+      <div style={{
+        flexShrink: 0,
+        background: 'rgba(1,4,2,0.98)',
+        borderTop: '1px solid rgba(140,100,25,0.16)',
+        padding: '8px 12px 10px',
+        display: 'flex', flexDirection: 'column', gap: 8,
+        zIndex: 30,
+      }}>
+        {/* Row 1: bankroll left, status centre */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <div style={{ fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.3)', fontFamily: 'sans-serif' }}>{playerName}</div>
+            <BankrollStack
+              amount={state.bankroll}
+              low={state.bankroll < config.minBet && isBettingPhase}
+              onAddFunds={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
+            />
+          </div>
+          {/* Status / next-round */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            {state.phase === 'BETTING' && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={{ ...ghostBtn, padding: '6px 12px', fontSize: 10 }}>Clear</button>
+                {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}>Deal</button>}
+              </div>
+            )}
+            {state.phase === 'SETTLEMENT' && (state as any).settled && (
+              <motion.button
+                data-testid="button-next-round"
+                onClick={() => dispatch({ type: 'NEXT_ROUND' })}
+                animate={{ boxShadow: ['0 4px 14px rgba(212,168,32,0.3)', '0 4px 28px rgba(212,168,32,0.65)', '0 4px 14px rgba(212,168,32,0.3)'] }}
+                transition={{ repeat: Infinity, duration: 1.4 }}
+                style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}
+              >Next Round</motion.button>
+            )}
+            {state.phase === 'DEALING' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Dealing…</div>}
+            {state.phase === 'INSURANCE' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Insurance at seat</div>}
+            {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Dealer playing…</div>}
+          </div>
+        </div>
+
+        {/* Row 2: chip tray (full width) */}
+        {isBettingPhase && anyActive && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+            {CHIP_AMOUNTS.map(amount => (
+              <div
+                key={amount}
+                data-testid={`chip-${amount}`}
+                role="button" tabIndex={0}
+                onClick={() => setSelectedChip(amount)}
+                onKeyDown={e => e.key === 'Enter' && setSelectedChip(amount)}
+                style={{
+                  cursor: 'pointer', border: 'none', background: 'none',
+                  transform: selectedChip === amount ? 'translateY(-6px) scale(1.12)' : 'scale(0.95)',
+                  transition: 'transform 0.15s',
+                  filter: selectedChip === amount ? 'drop-shadow(0 3px 10px rgba(255,255,255,0.3))' : 'none',
+                }}
+              >
+                <Chip amount={amount} size={selectedChip === amount ? chipSelected : chipSize} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── DESKTOP LAYOUT ──────────────────────────────────────────────────────────
   return (
     <div style={{
       height: 118, flexShrink: 0,
@@ -816,16 +1005,13 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
 
       {/* Center: chip tray + deal */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-
-        {/* Chip denominations (select only — bet is placed by clicking seat circle) */}
-        {(isBettingPhase) && anyActive && (
+        {isBettingPhase && anyActive && (
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5 }}>
             {CHIP_AMOUNTS.map(amount => (
               <div
                 key={amount}
                 data-testid={`chip-${amount}`}
-                role="button"
-                tabIndex={0}
+                role="button" tabIndex={0}
                 onClick={() => setSelectedChip(amount)}
                 onKeyDown={e => e.key === 'Enter' && setSelectedChip(amount)}
                 style={{
@@ -835,27 +1021,17 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
                   filter: selectedChip === amount ? 'drop-shadow(0 4px 12px rgba(255,255,255,0.3))' : 'none',
                 }}
               >
-                <Chip amount={amount} size={selectedChip === amount ? 50 : 42} />
+                <Chip amount={amount} size={selectedChip === amount ? chipSelected : chipSize} />
               </div>
             ))}
           </div>
         )}
-
-        {/* Bet-phase action row */}
         {state.phase === 'BETTING' && (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={ghostBtn}>
-              Clear Bets
-            </button>
-            {canDeal && (
-              <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={goldBtn}>
-                Deal
-              </button>
-            )}
+            <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={ghostBtn}>Clear Bets</button>
+            {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={goldBtn}>Deal</button>}
           </div>
         )}
-
-        {/* Next round */}
         {state.phase === 'SETTLEMENT' && (state as any).settled && (
           <motion.button
             data-testid="button-next-round"
@@ -863,21 +1039,11 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             animate={{ boxShadow: ['0 4px 14px rgba(212,168,32,0.3)', '0 4px 28px rgba(212,168,32,0.65)', '0 4px 14px rgba(212,168,32,0.3)'] }}
             transition={{ repeat: Infinity, duration: 1.4 }}
             style={goldBtn}
-          >
-            Next Round
-          </motion.button>
+          >Next Round</motion.button>
         )}
-
-        {/* Status labels */}
-        {state.phase === 'DEALING' && (
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>
-        )}
-        {state.phase === 'INSURANCE' && (
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>
-        )}
-        {state.phase === 'DEALER_TURN' && (
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealer's turn…</div>
-        )}
+        {state.phase === 'DEALING'     && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>}
+        {state.phase === 'INSURANCE'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>}
+        {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealer's turn…</div>}
       </div>
 
       {/* Selected chip reminder */}

@@ -182,12 +182,13 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         s.phase = 'SETTLEMENT';
         return s;
       }
-      // Auto-stand all natural BJ hands before player turn starts
+      // Auto-stand all natural BJ hands, pay immediate side bet bonuses, start player turn
       s.seats = autoStandBlackjacks(s.seats);
       s.phase = 'PLAYER_TURN';
-      s.activeSeatIndex = findRightmostActive(s.seats);
-      if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
-      return checkAllDone(s);
+      const withBonuses = evaluateImmediateSideBets(s as GameState);
+      withBonuses.activeSeatIndex = findRightmostActive(withBonuses.seats);
+      if (withBonuses.activeSeatIndex === -1) withBonuses.phase = 'DEALER_TURN';
+      return checkAllDone(withBonuses);
     }
     case 'INSURANCE': {
       const s = { ...state, seats: [...state.seats] };
@@ -271,40 +272,67 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
 
       s.bankroll -= hand.bet;
 
-      // Deal one card to each split hand
-      const card1 = s.shoe.pop();
-      const card2 = s.shoe.pop();
-      if (!card1 || !card2) { s.bankroll += hand.bet; return s; }
-      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
-
-      const isSplitAces = hand.cards[0].rank === 'A';
-
+      // Create two 1-card hands — second cards arrive one at a time via SPLIT_CARD
       const hand1: Hand = {
         id: Math.random().toString(36),
-        cards: [hand.cards[0], card1],
+        cards: [hand.cards[0]],
         bet: hand.bet,
-        status: isSplitAces ? 'stood' : 'playing',
+        status: 'playing',
         isSplit: true,
         doubled: false,
       };
       const hand2: Hand = {
         id: Math.random().toString(36),
-        cards: [hand.cards[1], card2],
+        cards: [hand.cards[1]],
         bet: hand.bet,
-        status: isSplitAces ? 'stood' : 'playing',
+        status: 'playing',
         isSplit: true,
         doubled: false,
       };
 
-      // Auto-stand on 21
-      if (calculateHandValue(hand1.cards).total === 21) hand1.status = 'stood';
-      if (calculateHandValue(hand2.cards).total === 21) hand2.status = 'stood';
-
       seat.hands.splice(hi, 1, hand1, hand2);
       s.seats[s.activeSeatIndex] = seat;
 
-      if (hand1.status !== 'playing') return moveToNextHand(s);
-      return s;
+      // Enter SPLIT_DEALING — Table.tsx will dispatch SPLIT_CARD twice with 550ms gaps
+      return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 0 };
+    }
+
+    case 'SPLIT_CARD': {
+      const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
+      const targetHandIdx = s.splitCardTarget ?? 0;
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
+      const isSplitAces = seat.hands[0]?.cards[0]?.rank === 'A';
+
+      const card = s.shoe.pop();
+      if (!card) return s;
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
+
+      const hand = { ...seat.hands[targetHandIdx], cards: [...seat.hands[targetHandIdx].cards, card] };
+
+      // Auto-stand: split aces get one card each, or hand is a 21
+      if (isSplitAces || calculateHandValue(hand.cards).total === 21) {
+        hand.status = 'stood';
+      }
+
+      seat.hands[targetHandIdx] = hand;
+      s.seats[s.activeSeatIndex] = seat;
+
+      if (targetHandIdx === 0) {
+        // First card dealt — wait for second SPLIT_CARD
+        return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 1 };
+      }
+
+      // Both cards dealt — evaluate immediate side bets, then start player turn
+      let next = { ...s, phase: 'PLAYER_TURN', splitCardTarget: undefined } as GameState;
+      next.seats = autoStandBlackjacks(next.seats);
+      next = evaluateImmediateSideBets(next) as GameState;
+      next.activeSeatIndex = s.activeSeatIndex; // stay on the split seat, hand 0
+      // Re-check if hand 0 is playable
+      const splitSeat = next.seats[next.activeSeatIndex];
+      if (splitSeat.hands[0]?.status !== 'playing') {
+        return moveToNextHand(next);
+      }
+      return checkAllDone(next);
     }
     case 'SURRENDER': {
       const s = { ...state, seats: [...state.seats] };
@@ -364,7 +392,6 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       s.seats = s.seats.map((seat: Seat) => {
         if (!seat.isActive || seat.hands.length === 0) return seat;
         let wonAmount = 0;
-        const sideResults: any[] = [];
 
         const newHands = seat.hands.map((hand: Hand) => {
           if (hand.status === 'surrendered') return { ...hand, result: 'surrender' as const };
@@ -386,18 +413,23 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
           return { ...hand, result: 'lose' as const };
         });
 
-        // Side bet settlement
+        // Side bet settlement — skip any bet already paid immediately at PLAYER_TURN start.
+        // `immediate: true` entries in sideBetResults were already bankrolled.
         const firstHand = seat.hands[0];
         const firstCards = firstHand?.cards || [];
 
-        // Insurance
-        if (seat.sideBets.insurance && dealerBJ) {
+        // Carry forward any results already stored (immediate payouts)
+        const sideResults: any[] = [...(seat.sideBetResults || [])];
+        const already = (name: string) => sideResults.some(r => r.betName === name);
+
+        // Insurance (still handled here — only known after dealer peek)
+        if (seat.sideBets.insurance && dealerBJ && !already('Insurance')) {
           const win = (seat.sideBets.insurance as number) * 2;
           wonAmount += (seat.sideBets.insurance as number) + win;
           sideResults.push({ betName: 'Insurance', win: true, payout: win, message: 'Pays 2:1' });
         }
-        // Perfect Pairs
-        if (seat.sideBets.perfectPairs && firstCards.length >= 2) {
+        // Perfect Pairs — skip if already paid
+        if (seat.sideBets.perfectPairs && firstCards.length >= 2 && !already('Perfect Pairs')) {
           const res = evaluatePerfectPairs(firstCards, true);
           if (res.payout > 0) {
             const win = (seat.sideBets.perfectPairs as number) * res.payout;
@@ -407,8 +439,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: 'Perfect Pairs', win: false, payout: 0, message: 'No pair' });
           }
         }
-        // 21+3
-        if (seat.sideBets.twentyOnePlusThree && firstCards.length >= 2 && s.dealerCards.length >= 1) {
+        // 21+3 — skip if already paid
+        if (seat.sideBets.twentyOnePlusThree && firstCards.length >= 2 && s.dealerCards.length >= 1 && !already('21+3')) {
           const res = evaluate21Plus3(firstCards, s.dealerCards[0], true);
           if (res.payout > 0) {
             const win = (seat.sideBets.twentyOnePlusThree as number) * res.payout;
@@ -418,8 +450,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: '21+3', win: false, payout: 0, message: 'No match' });
           }
         }
-        // Lucky Ladies
-        if (seat.sideBets.luckyLadies && firstCards.length >= 2) {
+        // Lucky Ladies — skip if already paid
+        if (seat.sideBets.luckyLadies && firstCards.length >= 2 && !already('Lucky Ladies')) {
           const res = evaluateLuckyLadies(firstCards, s.dealerCards, true);
           if (res.payout > 0) {
             const win = (seat.sideBets.luckyLadies as number) * res.payout;
@@ -429,8 +461,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: 'Lucky Ladies', win: false, payout: 0, message: 'No 20' });
           }
         }
-        // Super Sevens
-        if (seat.sideBets.superSevens && firstCards.length >= 1) {
+        // Super Sevens — always end-of-round (progressive, depends on hit cards)
+        if (seat.sideBets.superSevens && !already('Super Sevens')) {
           const handCards = newHands[0]?.cards || firstCards;
           const res = evaluateSuperSevens(handCards);
           if (res.payout > 0) {
@@ -441,8 +473,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: 'Super Sevens', win: false, payout: 0, message: 'No 7' });
           }
         }
-        // Lucky Lucky
-        if (seat.sideBets.luckyLucky && firstCards.length >= 2 && s.dealerCards.length >= 1) {
+        // Lucky Lucky — skip if already paid
+        if (seat.sideBets.luckyLucky && firstCards.length >= 2 && s.dealerCards.length >= 1 && !already('Lucky Lucky')) {
           const res = evaluateLuckyLucky(firstCards, s.dealerCards[0]);
           if (res.payout > 0) {
             const win = (seat.sideBets.luckyLucky as number) * res.payout;
@@ -452,8 +484,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: 'Lucky Lucky', win: false, payout: 0, message: 'Under 19' });
           }
         }
-        // Royal Match
-        if (seat.sideBets.royalMatch && firstCards.length >= 2) {
+        // Royal Match — skip if already paid
+        if (seat.sideBets.royalMatch && firstCards.length >= 2 && !already('Royal Match')) {
           const res = evaluateRoyalMatch(firstCards);
           if (res.payout > 0) {
             const win = Math.floor((seat.sideBets.royalMatch as number) * res.payout);
@@ -463,8 +495,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             sideResults.push({ betName: 'Royal Match', win: false, payout: 0, message: 'Off-suit' });
           }
         }
-        // Bust It
-        if (seat.sideBets.bustIt) {
+        // Bust It — always end-of-round (needs dealer outcome)
+        if (seat.sideBets.bustIt && !already('Bust It')) {
           const res = evaluateBustIt(s.dealerCards);
           if (res.payout > 0) {
             const win = (seat.sideBets.bustIt as number) * res.payout;
@@ -555,6 +587,92 @@ function autoStandBlackjacks(seats: Seat[]): Seat[] {
   });
 }
 
+/**
+ * Evaluate side bets that are decided by the initial 2 player cards + dealer upcard.
+ * Pays them out immediately and stores results with `immediate: true`.
+ * PERFORM_SETTLEMENT will skip any bet whose name already appears in sideBetResults.
+ */
+function evaluateImmediateSideBets(state: GameState): GameState {
+  const dealerUpcard = state.dealerCards[0];
+  let bankrollDelta = 0;
+
+  const seats = state.seats.map(seat => {
+    if (!seat.isActive || seat.hands.length === 0) return seat;
+    const firstCards = seat.hands[0]?.cards || [];
+    if (firstCards.length < 2) return seat;
+
+    const existing = seat.sideBetResults || [];
+    const already = (name: string) => existing.some(r => r.betName === name);
+    const newResults = [...existing];
+    let won = 0;
+
+    // Perfect Pairs
+    if (seat.sideBets.perfectPairs && !already('Perfect Pairs')) {
+      const r = evaluatePerfectPairs(firstCards, true);
+      if (r.payout > 0) {
+        const w = (seat.sideBets.perfectPairs as number) * r.payout;
+        won += (seat.sideBets.perfectPairs as number) + w;
+        newResults.push({ betName: 'Perfect Pairs', win: true, payout: w, message: r.msg, immediate: true } as any);
+      } else {
+        newResults.push({ betName: 'Perfect Pairs', win: false, payout: 0, message: 'No pair', immediate: true } as any);
+      }
+    }
+
+    // 21+3
+    if (seat.sideBets.twentyOnePlusThree && dealerUpcard && !already('21+3')) {
+      const r = evaluate21Plus3(firstCards, dealerUpcard, true);
+      if (r.payout > 0) {
+        const w = (seat.sideBets.twentyOnePlusThree as number) * r.payout;
+        won += (seat.sideBets.twentyOnePlusThree as number) + w;
+        newResults.push({ betName: '21+3', win: true, payout: w, message: r.msg, immediate: true } as any);
+      } else {
+        newResults.push({ betName: '21+3', win: false, payout: 0, message: 'No match', immediate: true } as any);
+      }
+    }
+
+    // Lucky Ladies
+    if (seat.sideBets.luckyLadies && !already('Lucky Ladies')) {
+      const r = evaluateLuckyLadies(firstCards, state.dealerCards, true);
+      if (r.payout > 0) {
+        const w = (seat.sideBets.luckyLadies as number) * r.payout;
+        won += (seat.sideBets.luckyLadies as number) + w;
+        newResults.push({ betName: 'Lucky Ladies', win: true, payout: w, message: r.msg, immediate: true } as any);
+      } else {
+        newResults.push({ betName: 'Lucky Ladies', win: false, payout: 0, message: 'No 20', immediate: true } as any);
+      }
+    }
+
+    // Lucky Lucky
+    if (seat.sideBets.luckyLucky && dealerUpcard && !already('Lucky Lucky')) {
+      const r = evaluateLuckyLucky(firstCards, dealerUpcard);
+      if (r.payout > 0) {
+        const w = (seat.sideBets.luckyLucky as number) * r.payout;
+        won += (seat.sideBets.luckyLucky as number) + w;
+        newResults.push({ betName: 'Lucky Lucky', win: true, payout: w, message: r.msg, immediate: true } as any);
+      } else {
+        newResults.push({ betName: 'Lucky Lucky', win: false, payout: 0, message: 'Under 19', immediate: true } as any);
+      }
+    }
+
+    // Royal Match
+    if (seat.sideBets.royalMatch && !already('Royal Match')) {
+      const r = evaluateRoyalMatch(firstCards);
+      if (r.payout > 0) {
+        const w = Math.floor((seat.sideBets.royalMatch as number) * r.payout);
+        won += (seat.sideBets.royalMatch as number) + w;
+        newResults.push({ betName: 'Royal Match', win: true, payout: w, message: r.msg, immediate: true } as any);
+      } else {
+        newResults.push({ betName: 'Royal Match', win: false, payout: 0, message: 'Off-suit', immediate: true } as any);
+      }
+    }
+
+    bankrollDelta += won;
+    return { ...seat, sideBetResults: newResults };
+  });
+
+  return { ...state, seats, bankroll: state.bankroll + bankrollDelta };
+}
+
 function moveToNextInsurance(state: GameState): GameState {
   // Insurance offered left→right (standard), so increment
   let next = state.activeSeatIndex + 1;
@@ -568,9 +686,10 @@ function moveToNextInsurance(state: GameState): GameState {
   if (isBlackjack(state.dealerCards)) {
     return { ...state, dealerStatus: 'blackjack', phase: 'SETTLEMENT' } as any;
   }
-  // Auto-stand natural BJ hands, then start player turn from rightmost
-  const s = { ...state, phase: 'PLAYER_TURN' } as GameState;
+  // Auto-stand natural BJ hands, pay immediate bonuses, start player turn from rightmost
+  let s = { ...state, phase: 'PLAYER_TURN' } as GameState;
   s.seats = autoStandBlackjacks(s.seats) as any;
+  s = evaluateImmediateSideBets(s) as GameState;
   s.activeSeatIndex = findRightmostActive(s.seats);
   if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
   return checkAllDone(s);
