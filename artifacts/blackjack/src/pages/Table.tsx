@@ -318,7 +318,12 @@ export default function Table() {
         </div>
       </div>
 
-      {/* ── SIDE BET BOTTOM SHEET (mobile only) ── */}
+      {/* ── PLAYER ACTION STRIP (mobile only — during PLAYER_TURN) ── */}
+      {isMobile && (
+        <PlayerActionStrip state={state} dispatch={dispatch} />
+      )}
+
+      {/* ── SIDE BET BOTTOM SHEET (mobile only — during BETTING) ── */}
       {isMobile && (
         <SideBetSheet
           state={state}
@@ -883,9 +888,9 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         </div>
       )}
 
-      {/* Action buttons — appear below circle on player's turn, hidden on natural BJ */}
+      {/* Action buttons — desktop only; mobile uses PlayerActionStrip at Table level */}
       <AnimatePresence>
-        {isPlayerTurn && !hasNaturalBJ && (
+        {!isMobile && isPlayerTurn && !hasNaturalBJ && (
           <motion.div
             initial={{ opacity: 0, y: -6, scale: 0.92 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -914,20 +919,125 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Player Action Strip  (mobile only — replaces in-arc action buttons)
+// Full-width strip that slides in from the bottom during PLAYER_TURN.
+// Large touch targets, never clipped by arc coordinates.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
+  if (state.phase !== 'PLAYER_TURN') return null;
+  const seat: Seat | undefined = state.seats[state.activeSeatIndex];
+  const activeHand: Hand | undefined = seat?.hands[seat.activeHandIndex];
+  if (!activeHand) return null;
+
+  const hasNaturalBJ = !activeHand.isSplit && activeHand.cards.length === 2
+    && calculateHandValue(activeHand.cards).total === 21;
+  if (hasNaturalBJ) return null;
+
+  const canDouble    = state.bankroll >= activeHand.bet;
+  const canSplit     = activeHand.cards.length === 2
+    && activeHand.cards[0].rank === activeHand.cards[1].rank
+    && state.bankroll >= activeHand.bet && (seat?.hands.length ?? 0) < 4;
+  const canSurrender = activeHand.cards.length === 2 && !activeHand.isSplit;
+
+  return (
+    <motion.div
+      key="action-strip"
+      initial={{ y: 60, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 60, opacity: 0 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 36 }}
+      style={{
+        flexShrink: 0,
+        background: 'rgba(2,8,4,0.97)',
+        borderTop: '1px solid rgba(212,168,32,0.22)',
+        padding: '8px 12px 10px',
+        display: 'flex', flexDirection: 'column', gap: 7,
+        zIndex: 36,
+      }}
+    >
+      {/* Row 1 — Hit + Stand: large primary buttons */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        {[
+          { label: 'Hit',   action: 'HIT',   primary: true,  disabled: false },
+          { label: 'Stand', action: 'STAND', primary: false, disabled: false },
+        ].map(({ label, action, primary, disabled }) => (
+          <button key={action}
+            data-testid={`button-${label.toLowerCase()}`}
+            onClick={() => dispatch({ type: action })}
+            style={{
+              flex: 1, height: 50,
+              background: primary
+                ? 'linear-gradient(135deg,#c49a10,#e6c038)'
+                : 'rgba(255,255,255,0.1)',
+              border: primary ? 'none' : '1px solid rgba(255,255,255,0.22)',
+              borderRadius: 7,
+              fontSize: 14, fontWeight: 800, letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: primary ? '#000' : '#f0e6c8',
+              cursor: 'pointer', fontFamily: 'sans-serif',
+              boxShadow: primary ? '0 3px 14px rgba(212,168,32,0.4)' : 'none',
+            }}
+          >{label}</button>
+        ))}
+      </div>
+      {/* Row 2 — Double / Split / Surrender: smaller secondary */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {[
+          { label: 'Double',   action: 'DOUBLE',    disabled: !canDouble },
+          { label: 'Split',    action: 'SPLIT',     disabled: !canSplit },
+          { label: 'Surrender',action: 'SURRENDER', disabled: !canSurrender },
+        ].map(({ label, action, disabled }) => (
+          <button key={action}
+            data-testid={`button-${action.toLowerCase()}`}
+            onClick={() => !disabled && dispatch({ type: action })}
+            style={{
+              flex: 1, height: 36,
+              background: disabled ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.07)',
+              border: `1px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.18)'}`,
+              borderRadius: 5,
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: disabled ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.7)',
+              cursor: disabled ? 'default' : 'pointer',
+              fontFamily: 'sans-serif',
+            }}
+          >{label}</button>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Side Bet Bottom Sheet  (mobile only)
-// Renders in the layout flex-column between the felt and the control bar,
-// so it is NEVER clipped by the arc coordinates.  Industry-standard approach:
-// a fixed-height panel that slides in when a seat is selected for betting.
+// Renders in the layout flex-column so it is NEVER clipped by arc coordinates.
+// Multi-seat: tabs let the player switch which seat they are editing WITHOUT
+// placing a chip — switching tab is a pure local state change.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SideBetSheet({ state, dispatch, config, selectedChip }: {
   state: any; dispatch: any; config: TableConfig; selectedChip: number;
 }) {
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
-  const seatId: number | undefined = state.bettingSeatId;
-  const seat: Seat | undefined = seatId != null ? state.seats[seatId] : undefined;
   const sideBets = config.sideBets.filter((s: string) => s !== 'insurance');
-  const visible = isBettingPhase && seat?.isActive && sideBets.length > 0;
+
+  // All occupied seats that are active
+  const occupiedSeats: number[] = (state.seats as Seat[])
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => s.isActive)
+    .map(({ i }) => i);
+
+  // Internal focused seat — switching tabs does NOT dispatch anything
+  const [focusedId, setFocusedId] = useState<number>(state.bettingSeatId ?? occupiedSeats[0] ?? 0);
+
+  // Sync focused seat when the game selects a new seat (e.g. after sitting down)
+  useEffect(() => {
+    if (state.bettingSeatId != null) setFocusedId(state.bettingSeatId);
+  }, [state.bettingSeatId]);
+
+  const seat: Seat | undefined = state.seats[focusedId];
+  const visible = isBettingPhase && occupiedSeats.length > 0 && sideBets.length > 0 && !!seat?.isActive;
 
   return (
     <AnimatePresence>
@@ -944,54 +1054,87 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
             zIndex: 35,
           }}
         >
-          {/* Header row */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '7px 14px 4px',
-          }}>
+          {/* ── Seat tab bar (only when 2+ seats occupied) ── */}
+          {occupiedSeats.length > 1 && (
             <div style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase',
-              color: 'rgba(212,168,32,0.55)', fontFamily: 'sans-serif',
+              display: 'flex', gap: 0,
+              borderBottom: '1px solid rgba(255,255,255,0.07)',
+              overflowX: 'auto',
             }}>
-              Side Bets — Seat {(seatId ?? 0) + 1}
+              {occupiedSeats.map(idx => {
+                const s: Seat = state.seats[idx];
+                const total = sideBets.reduce((acc: number, sb: string) =>
+                  acc + ((s.sideBets as any)[sb] ?? 0), 0);
+                const active = idx === focusedId;
+                return (
+                  <button key={idx}
+                    onClick={() => setFocusedId(idx)}   // ← NO chip dispatch
+                    style={{
+                      flex: 1, minWidth: 64, padding: '8px 6px',
+                      background: active ? 'rgba(212,168,32,0.12)' : 'transparent',
+                      border: 'none',
+                      borderBottom: active ? '2px solid #d4a820' : '2px solid transparent',
+                      cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      color: active ? '#d4a820' : 'rgba(255,255,255,0.38)',
+                      fontFamily: 'sans-serif', textTransform: 'uppercase',
+                    }}>Seat {idx + 1}</span>
+                    {total > 0 && (
+                      <span style={{
+                        fontSize: 8, fontWeight: 700, color: active ? '#d4a820' : 'rgba(212,168,32,0.5)',
+                        fontFamily: 'sans-serif',
+                      }}>${total}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-            {/* Show placed side bet totals as a summary */}
-            {seat && (() => {
-              const total = sideBets.reduce((s: number, sb: string) => s + ((seat.sideBets as any)[sb] ?? 0), 0);
-              return total > 0 ? (
-                <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700 }}>
-                  Placed: ${total}
-                </div>
-              ) : null;
-            })()}
-          </div>
+          )}
 
-          {/* Chip grid */}
+          {/* ── Header (single-seat: show seat label + total) ── */}
+          {occupiedSeats.length === 1 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '7px 14px 4px',
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.55)', fontFamily: 'sans-serif' }}>
+                Side Bets — Seat {focusedId + 1}
+              </div>
+              {(() => {
+                const total = sideBets.reduce((acc: number, sb: string) => acc + ((seat?.sideBets as any)?.[sb] ?? 0), 0);
+                return total > 0
+                  ? <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700 }}>Placed: ${total}</div>
+                  : null;
+              })()}
+            </div>
+          )}
+
+          {/* ── Side bet chip grid ── */}
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: 10,
-            padding: '4px 14px 10px',
+            padding: occupiedSeats.length > 1 ? '8px 14px 10px' : '4px 14px 10px',
             justifyContent: 'flex-start',
           }}>
             {sideBets.map((sb: string) => {
-              const placed = seat ? ((seat.sideBets as any)[sb] ?? 0) : 0;
+              const placed = (seat?.sideBets as any)?.[sb] ?? 0;
               return (
-                <div key={sb}
-                  data-testid={`sidebet-${sb}`}
+                <div key={sb} data-testid={`sidebet-${sb}`}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
                 >
                   <SideBetChip
                     label={SIDE_BET_LABELS[sb] || sb}
                     amount={placed}
                     onClick={() => {
-                      dispatch({ type: 'PLACE_SIDE_BET', seatId, betType: sb as keyof SideBets, amount: selectedChip });
+                      // Place side bet on the FOCUSED seat only — no main-bet chip placed
+                      dispatch({ type: 'PLACE_SIDE_BET', seatId: focusedId, betType: sb as keyof SideBets, amount: selectedChip });
                     }}
                   />
-                  {/* Placed amount label below chip */}
                   {placed > 0 && (
-                    <div style={{
-                      fontSize: 8, fontWeight: 700, color: '#d4a820',
-                      fontFamily: 'sans-serif', letterSpacing: '0.06em',
-                    }}>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: '#d4a820', fontFamily: 'sans-serif' }}>
                       ${placed}
                     </div>
                   )}
