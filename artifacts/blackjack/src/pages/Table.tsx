@@ -318,6 +318,16 @@ export default function Table() {
         </div>
       </div>
 
+      {/* ── SIDE BET BOTTOM SHEET (mobile only) ── */}
+      {isMobile && (
+        <SideBetSheet
+          state={state}
+          dispatch={dispatch}
+          config={tableConfig}
+          selectedChip={selectedChip}
+        />
+      )}
+
       {/* ── CONTROL BAR ── */}
       <ControlBar
         state={state}
@@ -830,18 +840,23 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 
       {/* ── BELOW ZONE: side bets (betting) or action buttons (player turn) ── */}
 
-      {/* Side bet chips:
-          Desktop — all seated spots show them (selected=full, others=compact).
-          Mobile   — ONLY the selected seat shows them to avoid cramped overflow. */}
-      {isBettingPhase && config.sideBets.filter(s => s !== 'insurance').length > 0 &&
-       (!isMobile || isSelectedBet) && (
+      {/* Side bet chips — desktop only (mobile uses SideBetSheet at Table level).
+          Smart anchor: left seats pin panel's left edge to circle's left edge,
+          right seats pin panel's right edge to circle's right edge, center = centered.
+          This prevents overflow on both edges of the felt. */}
+      {!isMobile && isBettingPhase && config.sideBets.filter(s => s !== 'insurance').length > 0 && (
         <div
           style={{
             position: 'absolute', top: R + 10,
-            left: '50%', transform: 'translateX(-50%)',
+            // Smart anchor based on horizontal seat position
+            ...(seatXPct < 33
+              ? { left: -R,     transform: 'translateX(0)' }       // leftmost: pin left edge
+              : seatXPct > 67
+              ? { left:  R,     transform: 'translateX(-100%)' }    // rightmost: pin right edge
+              : { left: '0px',  transform: 'translateX(-50%)' }),   // center seats: centre
             display: 'flex', flexWrap: 'wrap', gap: isSelectedBet ? 6 : 4,
             justifyContent: 'center',
-            width: isSelectedBet ? (isMobile ? 200 : 220) : 170,
+            width: isSelectedBet ? 220 : 170,
             zIndex: 25,
           }}
         >
@@ -895,6 +910,98 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Side Bet Bottom Sheet  (mobile only)
+// Renders in the layout flex-column between the felt and the control bar,
+// so it is NEVER clipped by the arc coordinates.  Industry-standard approach:
+// a fixed-height panel that slides in when a seat is selected for betting.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SideBetSheet({ state, dispatch, config, selectedChip }: {
+  state: any; dispatch: any; config: TableConfig; selectedChip: number;
+}) {
+  const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
+  const seatId: number | undefined = state.bettingSeatId;
+  const seat: Seat | undefined = seatId != null ? state.seats[seatId] : undefined;
+  const sideBets = config.sideBets.filter((s: string) => s !== 'insurance');
+  const visible = isBettingPhase && seat?.isActive && sideBets.length > 0;
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 38 }}
+          style={{
+            flexShrink: 0, overflow: 'hidden',
+            background: 'rgba(2,10,5,0.97)',
+            borderTop: '1px solid rgba(212,168,32,0.18)',
+            zIndex: 35,
+          }}
+        >
+          {/* Header row */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '7px 14px 4px',
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: 'rgba(212,168,32,0.55)', fontFamily: 'sans-serif',
+            }}>
+              Side Bets — Seat {(seatId ?? 0) + 1}
+            </div>
+            {/* Show placed side bet totals as a summary */}
+            {seat && (() => {
+              const total = sideBets.reduce((s: number, sb: string) => s + ((seat.sideBets as any)[sb] ?? 0), 0);
+              return total > 0 ? (
+                <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700 }}>
+                  Placed: ${total}
+                </div>
+              ) : null;
+            })()}
+          </div>
+
+          {/* Chip grid */}
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 10,
+            padding: '4px 14px 10px',
+            justifyContent: 'flex-start',
+          }}>
+            {sideBets.map((sb: string) => {
+              const placed = seat ? ((seat.sideBets as any)[sb] ?? 0) : 0;
+              return (
+                <div key={sb}
+                  data-testid={`sidebet-${sb}`}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
+                >
+                  <SideBetChip
+                    label={SIDE_BET_LABELS[sb] || sb}
+                    amount={placed}
+                    onClick={() => {
+                      dispatch({ type: 'PLACE_SIDE_BET', seatId, betType: sb as keyof SideBets, amount: selectedChip });
+                    }}
+                  />
+                  {/* Placed amount label below chip */}
+                  {placed > 0 && (
+                    <div style={{
+                      fontSize: 8, fontWeight: 700, color: '#d4a820',
+                      fontFamily: 'sans-serif', letterSpacing: '0.06em',
+                    }}>
+                      ${placed}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
