@@ -11,7 +11,7 @@ export interface GameState {
   cutCardIndex: number;
   needsShuffle: boolean;
   bankroll: number;
-  bettingSeatId?: number; // for UI to track which seat is being bet on
+  bettingSeatId?: number;
 }
 
 export type GameAction =
@@ -23,7 +23,7 @@ export type GameAction =
   | { type: 'PLACE_SIDE_BET'; seatId: number; betType: keyof SideBets; amount: number }
   | { type: 'CLEAR_BETS' }
   | { type: 'DEAL' }
-  | { type: 'CARD_DEALT'; to: 'player' | 'dealer'; seatId?: number; card: Card }
+  | { type: 'CARD_DEALT'; to: 'player' | 'dealer'; seatId?: number }
   | { type: 'CHECK_DEALER_BJ' }
   | { type: 'START_PLAYER_TURN' }
   | { type: 'HIT' }
@@ -35,6 +35,8 @@ export type GameAction =
   | { type: 'DECLINE_INSURANCE' }
   | { type: 'NEXT_HAND' }
   | { type: 'DEALER_TURN' }
+  | { type: 'DEALER_PLAY' }
+  | { type: 'PERFORM_SETTLEMENT' }
   | { type: 'SETTLEMENT' }
   | { type: 'NEXT_ROUND' }
   | { type: 'ADD_BANKROLL'; amount: number };

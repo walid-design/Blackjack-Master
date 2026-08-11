@@ -1,429 +1,850 @@
-import { useState, useEffect, useReducer } from 'react';
+import { useState, useEffect, useReducer, useRef, useMemo, CSSProperties } from 'react';
 import { useLocation, useParams } from 'wouter';
-import { TABLES, TableConfig, Card, Hand, Seat, calculateHandValue, SideBets } from '@/lib/blackjack';
+import { TABLES, TableConfig, Card, Hand, Seat, calculateHandValue, isBlackjack, SideBets } from '@/lib/blackjack';
+import { GameState } from '@/lib/types';
 import { gameReducer, createInitialState } from '@/lib/reducer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
 import { PlayingCard } from '@/components/PlayingCard';
 import { Chip, ChipStack } from '@/components/Chip';
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+function getSeatPositions(n: number): Array<{ x: number; y: number }> {
+  return Array.from({ length: n }, (_, i) => {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    const x = 8 + t * 84;
+    const tNorm = (t - 0.5) * 2;
+    const y = 80 - 9 * tNorm * tNorm;
+    return { x, y };
+  });
+}
+
 export default function Table() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   const tableConfig = TABLES.find(t => t.id === id);
+  const [playerName, setPlayerName] = useState('Player');
+
+  useEffect(() => {
+    const n = localStorage.getItem('bj_player_name');
+    if (n) setPlayerName(n);
+  }, []);
+
+  const initBankroll = useMemo(() => {
+    const s = localStorage.getItem('bj_bankroll');
+    return s ? parseInt(s, 10) : 1000;
+  }, []);
+
+  const [state, dispatch] = useReducer(
+    gameReducer as any,
+    null,
+    () => createInitialState(tableConfig!, initBankroll)
+  );
+
+  useEffect(() => {
+    localStorage.setItem('bj_bankroll', state.bankroll.toString());
+  }, [state.bankroll]);
+
+  const dealingRef = useRef(false);
+
+  // DEALING phase: sequentially deal cards
+  useEffect(() => {
+    if (state.phase === 'DEALING') {
+      if (dealingRef.current) return;
+      dealingRef.current = true;
+      const activeSeats = (state.seats as Seat[]).filter(s => s.isActive && s.hands.length > 0);
+      (async () => {
+        // First card to each player
+        for (const seat of activeSeats) {
+          dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
+          await sleep(280);
+        }
+        // Dealer first card (face up)
+        dispatch({ type: 'CARD_DEALT', to: 'dealer' });
+        await sleep(280);
+        // Second card to each player
+        for (const seat of activeSeats) {
+          dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
+          await sleep(280);
+        }
+        // Dealer hole card (face down)
+        dispatch({ type: 'CARD_DEALT', to: 'dealer' });
+        await sleep(500);
+        dispatch({ type: 'CHECK_DEALER_BJ' });
+      })();
+    } else {
+      dealingRef.current = false;
+    }
+  }, [state.phase]);
+
+  // DEALER_TURN: compute all dealer draws at once
+  useEffect(() => {
+    if (state.phase !== 'DEALER_TURN') return;
+    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 1100);
+    return () => clearTimeout(t);
+  }, [state.phase]);
+
+  // SETTLEMENT: trigger computation
+  useEffect(() => {
+    if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
+      const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), 400);
+      return () => clearTimeout(t);
+    }
+  }, [state.phase, (state as any).settled]);
 
   if (!tableConfig) {
     setLocation('/');
     return null;
   }
 
-  const [bankroll, setBankroll] = useState(1000);
-  const [playerName, setPlayerName] = useState('Player');
-
-  useEffect(() => {
-    const savedName = localStorage.getItem('bj_player_name');
-    const savedBankroll = localStorage.getItem('bj_bankroll');
-    if (savedName) setPlayerName(savedName);
-    if (savedBankroll) setBankroll(parseInt(savedBankroll, 10));
-  }, []);
-
-  const [state, dispatch] = useReducer(gameReducer, null, () => createInitialState(tableConfig, bankroll));
-
-  useEffect(() => {
-    if (state.bankroll !== bankroll) {
-      setBankroll(state.bankroll);
-      localStorage.setItem('bj_bankroll', state.bankroll.toString());
-    }
-  }, [state.bankroll, bankroll]);
-
-  // -- Engine --
-  useEffect(() => {
-    if (state.phase === 'DEALING') {
-       const dealSequence = async () => {
-         const activeSeats = state.seats.filter(s => s.isActive && s.hands.length > 0);
-         for (const seat of activeSeats) {
-           dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-           await new Promise(r => setTimeout(r, 200));
-         }
-         dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-         await new Promise(r => setTimeout(r, 200));
-         for (const seat of activeSeats) {
-           dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-           await new Promise(r => setTimeout(r, 200));
-         }
-         dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-         await new Promise(r => setTimeout(r, 400));
-         dispatch({ type: 'CHECK_DEALER_BJ' });
-       };
-       dealSequence();
-    }
-  }, [state.phase, state.seats]);
-
-  useEffect(() => {
-    if (state.phase === 'DEALER_TURN') {
-       const dealerPlay = async () => {
-         await new Promise(r => setTimeout(r, 800)); 
-         dispatch({ type: 'DEALER_TICK' });
-       };
-       dealerPlay();
-    }
-  }, [state.phase, state.dealerCards]); 
-
-  useEffect(() => {
-    if (state.phase === 'DEALER_TICK' as any) {
-      const val = calculateHandValue(state.dealerCards);
-      if (val.total < 17) {
-        setTimeout(() => dispatch({ type: 'CARD_DEALT', to: 'dealer' }), 500);
-      } else {
-        setTimeout(() => dispatch({ type: 'SETTLEMENT' }), 500);
-      }
-    }
-  }, [state.phase, state.dealerCards]);
-
-  useEffect(() => {
-    if (state.phase === 'SETTLEMENT' && !(state as any).settled) { 
-      dispatch({ type: 'PERFORM_SETTLEMENT' }); 
-    }
-  }, [state.phase, state]);
-
-  const handleLeaveTable = () => {
-    setLocation('/');
-  };
+  const seatPositions = getSeatPositions(tableConfig.seats);
+  const shoeRemaining = state.shoe.length;
+  const shoeTotal = tableConfig.decks * 52;
+  const shoePct = Math.max(5, (shoeRemaining / shoeTotal) * 100);
 
   return (
-    <div className="min-h-[100dvh] w-full bg-background flex flex-col font-sans select-none overflow-hidden relative text-foreground">
-      <header className="h-14 flex items-center justify-between px-4 bg-card/80 border-b border-border/50 z-20 backdrop-blur-md">
-        <button 
-          onClick={handleLeaveTable}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors uppercase tracking-wider text-xs font-semibold"
+    <div style={{
+      height: '100dvh',
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#020605',
+      overflow: 'hidden',
+      userSelect: 'none',
+      fontFamily: "'Playfair Display', serif",
+      color: '#f0e6c8',
+    }}>
+      {/* ── HEADER ── */}
+      <header style={{
+        height: 46,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        background: 'rgba(2,5,3,0.98)',
+        borderBottom: '1px solid rgba(160,120,40,0.2)',
+        zIndex: 30,
+      }}>
+        <button
+          data-testid="button-leave"
+          onClick={() => setLocation('/')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            color: 'rgba(240,230,200,0.5)',
+            fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+            fontWeight: 700, fontFamily: 'sans-serif',
+            background: 'none', border: 'none', cursor: 'pointer',
+          }}
         >
-          <ChevronLeft className="w-4 h-4" /> Leave Table
+          <ChevronLeft size={14} /> Leave
         </button>
-        <div className="flex flex-col items-center">
-          <h1 className="font-serif gold-accent text-transparent bg-clip-text text-lg font-bold tracking-widest">{tableConfig.name}</h1>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-widest">{tableConfig.decks} Decks • Dealer Stands 17</span>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.22em', color: '#d4a820' }}>
+            {tableConfig.name.toUpperCase()}
+          </div>
+          <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.3)', fontFamily: 'sans-serif', marginTop: 1 }}>
+            {tableConfig.decks} Deck{tableConfig.decks > 1 ? 's' : ''} · ${tableConfig.minBet}–${tableConfig.maxBet}
+          </div>
         </div>
-        <div className="w-24"></div> 
+
+        {/* Shoe gauge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', textTransform: 'uppercase', fontFamily: 'sans-serif', letterSpacing: '0.1em' }}>Shoe</div>
+          <div style={{ width: 48, height: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
+            <motion.div animate={{ width: `${shoePct}%` }} transition={{ duration: 0.5 }}
+              style={{ height: '100%', background: '#d4a820', borderRadius: 3 }}
+            />
+          </div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', fontFamily: 'sans-serif' }}>{shoeRemaining}</div>
+        </div>
       </header>
 
-      <main className="flex-1 relative flex flex-col items-center overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] bg-opacity-5">
-        <div className="absolute top-[-10%] w-[150%] h-[120%] table-felt felt-border -z-10"></div>
-        <TableFelt state={state} dispatch={dispatch} config={tableConfig} bankroll={bankroll} />
-      </main>
+      {/* ── GAME AREA ── */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#010403' }}>
 
-      <ControlBar state={state} dispatch={dispatch} playerName={playerName} bankroll={bankroll} config={tableConfig} />
-    </div>
-  );
-}
+        {/* FELT TABLE */}
+        <div style={{
+          position: 'absolute',
+          top: 0, left: '-3%', right: '-3%',
+          bottom: '1%',
+          background: 'radial-gradient(ellipse 100% 80% at 50% 15%, #20844a 0%, #15633a 35%, #0d4a28 60%, #083318 88%, #051e10 100%)',
+          borderRadius: '0 0 50% 50% / 0 0 18% 18%',
+          borderBottom: '22px solid #221005',
+          borderLeft: '8px solid #1a0c04',
+          borderRight: '8px solid #1a0c04',
+          boxShadow: 'inset 0 0 100px rgba(0,0,0,0.55), 0 12px 50px rgba(0,0,0,0.9)',
+          zIndex: 1,
+        }}>
 
-function TableFelt({ state, dispatch, config, bankroll }: { state: any, dispatch: any, config: TableConfig, bankroll: number }) {
-  const dealerCards = state.dealerCards || [];
-  const dealerVal = calculateHandValue(dealerCards);
-  
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-between pt-8 pb-32 relative max-w-6xl mx-auto z-10">
-      <div className="flex flex-col items-center gap-2 mt-4 relative">
-        <div className="flex justify-center relative h-[100px] md:h-[120px] w-64 items-center">
-          <AnimatePresence>
-            {dealerCards.map((card: Card, i: number) => {
-               const isHoleCard = i === 1;
-               const hide = isHoleCard && !['DEALER_TURN', 'DEALER_TICK', 'SETTLEMENT'].includes(state.phase) && state.dealerStatus !== 'blackjack';
-               return (
-                 <div key={i} className="absolute" style={{ transform: `translateX(${(i - (dealerCards.length-1)/2) * 30}px)` }}>
-                   <PlayingCard card={card} faceDown={hide} index={i} stacked={true} />
-                 </div>
-               )
-            })}
-          </AnimatePresence>
-        </div>
-        {dealerCards.length > 0 && ['DEALER_TURN', 'DEALER_TICK', 'SETTLEMENT'].includes(state.phase) && (
-          <div className="bg-black/40 text-white/70 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border border-white/10">
-            {dealerVal.total}
+          {/* ── Felt rules text ── */}
+          <div style={{
+            position: 'absolute',
+            top: '33%', left: '50%', transform: 'translateX(-50%)',
+            textAlign: 'center',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            zIndex: 2,
+          }}>
+            <div style={{ fontStyle: 'italic', fontWeight: 700, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.08)', fontSize: 'clamp(13px,1.8vw,21px)', textTransform: 'uppercase' }}>
+              Blackjack Pays 3 to 2
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.055)', fontSize: 'clamp(8px,1vw,12px)', letterSpacing: '0.14em', marginTop: 4, fontFamily: 'sans-serif', fontStyle: 'normal', textTransform: 'uppercase' }}>
+              Dealer Must Draw to 16 and Stand on All 17s
+            </div>
+            <div style={{ color: 'rgba(255,255,255,0.05)', fontSize: 'clamp(7px,0.9vw,11px)', letterSpacing: '0.12em', marginTop: 3, fontFamily: 'sans-serif', fontStyle: 'italic', textTransform: 'uppercase' }}>
+              Insurance Pays 2 to 1
+            </div>
           </div>
-        )}
+
+          {/* ── DEALER ZONE ── */}
+          <DealerZone state={state} />
+
+          {/* ── CARD SHOE ── */}
+          <CardShoe shoe={state.shoe} decks={tableConfig.decks} />
+
+          {/* ── SEATS along bottom arc ── */}
+          {seatPositions.map(({ x, y }, i) => (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                left: `${x}%`,
+                top: `${y}%`,
+                transform: 'translate(-50%, -50%)',
+                zIndex: state.activeSeatIndex === i ? 20 : 10,
+              }}
+            >
+              <SeatSpot
+                seat={state.seats[i]}
+                state={state}
+                dispatch={dispatch}
+                seatIndex={i}
+                config={tableConfig}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div className="absolute top-[40%] w-[80%] aspect-square border-[3px] border-primary/20 rounded-full -translate-y-1/2 pointer-events-none"></div>
-      
-      <div className="absolute top-[45%] text-primary/30 font-serif text-3xl md:text-5xl uppercase tracking-[0.3em] font-bold opacity-30 pointer-events-none text-center leading-relaxed">
-        Blackjack Pays 3 to 2<br/><span className="text-xl md:text-2xl tracking-[0.2em] font-sans">Dealer must draw to 16, and stand on all 17s</span><br/><span className="text-sm md:text-lg tracking-widest text-primary/40 mt-4 block font-sans">Insurance Pays 2 to 1</span>
+      {/* ── CONTROL BAR ── */}
+      <ControlBar state={state} dispatch={dispatch} playerName={playerName} config={tableConfig} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DealerZone({ state }: { state: any }) {
+  const dealerCards: Card[] = state.dealerCards || [];
+  const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
+  const val = revealed && dealerCards.length > 0 ? calculateHandValue(dealerCards) : null;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: '3%', left: '50%', transform: 'translateX(-50%)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+      zIndex: 5,
+    }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)', fontFamily: 'sans-serif' }}>
+        Dealer
       </div>
 
-      <div className="w-full flex justify-center items-end gap-2 md:gap-8 px-8 absolute bottom-4">
-        {state.seats.map((seat: Seat) => (
-          <SeatView key={seat.id} seat={seat} state={state} dispatch={dispatch} config={config} bankroll={bankroll} />
+      {/* Dealer cards */}
+      <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <AnimatePresence>
+          {dealerCards.map((card, i) => {
+            const faceDown = i === 1 && !revealed;
+            return (
+              <motion.div
+                key={`dc-${i}`}
+                initial={{ x: 100, y: -80, opacity: 0, rotate: 12 }}
+                animate={{ x: (i - (dealerCards.length - 1) / 2) * 26, y: 0, opacity: 1, rotate: 0 }}
+                transition={{ delay: i * 0.12, type: 'spring', stiffness: 260, damping: 23 }}
+                style={{ position: 'absolute', top: 0 }}
+              >
+                <PlayingCard card={card} faceDown={faceDown} />
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+
+      {/* Value badge */}
+      {val && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          style={{
+            background: 'rgba(0,0,0,0.6)',
+            border: `1px solid ${state.dealerStatus === 'busted' ? 'rgba(220,60,60,0.5)' : 'rgba(255,255,255,0.15)'}`,
+            borderRadius: 20, padding: '2px 10px',
+            fontSize: 12, fontWeight: 700, fontFamily: 'sans-serif',
+            color: state.dealerStatus === 'busted' ? '#e05050' : 'rgba(255,255,255,0.7)',
+          }}
+        >
+          {state.dealerStatus === 'blackjack' ? 'BLACKJACK' : state.dealerStatus === 'busted' ? `BUST (${val.total})` : val.total}
+          {val.soft && val.total < 21 && state.dealerStatus !== 'busted' ? ' soft' : ''}
+        </motion.div>
+      )}
+
+      {/* Phase hints */}
+      {state.phase === 'SEAT_SELECTION' && (
+        <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif' }}>
+          Select a seat to join
+        </div>
+      )}
+      {state.phase === 'BETTING' && (
+        <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.5)', fontFamily: 'sans-serif' }}>
+          Place your bets
+        </div>
+      )}
+      {state.phase === 'DEALER_TURN' && (
+        <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.5)', fontFamily: 'sans-serif' }}>
+          Dealer playing…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CardShoe({ shoe, decks }: { shoe: Card[]; decks: number }) {
+  const total = decks * 52;
+  const visible = Math.max(1, Math.ceil((shoe.length / total) * 12));
+
+  return (
+    <div style={{
+      position: 'absolute', top: '3.5%', right: '4%',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+      zIndex: 5,
+    }}>
+      {/* Shoe box */}
+      <div style={{
+        position: 'relative',
+        width: 52, height: 76,
+      }}>
+        {Array.from({ length: visible }).map((_, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            top: i * 1.2,
+            left: i % 2 === 0 ? 0 : 1,
+            width: 46,
+            height: 64,
+            background: i % 2 === 0 ? '#0c4020' : '#0a3519',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 4,
+            boxShadow: '0 1px 2px rgba(0,0,0,0.6)',
+          }} />
         ))}
+        {/* Top face-down card */}
+        <div style={{
+          position: 'absolute', top: visible * 1.2, left: 2,
+          width: 46, height: 64,
+          background: 'linear-gradient(135deg, #0f5230 0%, #062010 100%)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          borderRadius: 4,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{ width: 30, height: 46, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, opacity: 0.25 }} />
+        </div>
+      </div>
+      <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontFamily: 'sans-serif', letterSpacing: '0.08em' }}>
+        {shoe.length}/{total}
       </div>
     </div>
   );
 }
 
-function SeatView({ seat, state, dispatch, config, bankroll }: { seat: Seat, state: any, dispatch: any, config: TableConfig, bankroll: number }) {
-  const handleSit = () => dispatch({ type: 'SIT', seatId: seat.id });
-  const handleSelectBet = () => dispatch({ type: 'SELECT_BET_SEAT', seatId: seat.id });
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SeatSpot({ seat, state, dispatch, seatIndex, config }: {
+  seat: Seat;
+  state: any;
+  dispatch: any;
+  seatIndex: number;
+  config: TableConfig;
+}) {
+  const isPlayerTurn = state.phase === 'PLAYER_TURN' && state.activeSeatIndex === seatIndex;
+  const isBetting = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
+  const isSelectedBetSeat = state.bettingSeatId === seatIndex;
+  const currentBet = seat.hands[0]?.bet || 0;
 
   if (!seat.isActive) {
+    if (!isBetting) return null;
     return (
-      <div className="flex flex-col items-center justify-end w-20 md:w-32 h-48 relative">
-        {state.phase === 'SEAT_SELECTION' && (
-          <button 
-            onClick={handleSit}
-            className="w-12 h-12 rounded-full border-2 border-dashed border-white/30 flex items-center justify-center text-white/30 hover:border-white/70 hover:text-white/70 hover:bg-white/5 transition-all mb-8"
-          >
-            <span className="text-xl">+</span>
-          </button>
-        )}
-      </div>
+      <motion.button
+        data-testid={`button-sit-${seatIndex}`}
+        onClick={() => {
+          dispatch({ type: 'SIT', seatId: seatIndex });
+          dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
+        }}
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        whileHover={{ scale: 1.12 }}
+        whileTap={{ scale: 0.96 }}
+        style={{
+          width: 66, height: 66, borderRadius: '50%',
+          border: '2px dashed rgba(255,255,255,0.28)',
+          background: 'rgba(0,0,0,0.18)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: 'rgba(255,255,255,0.4)', gap: 1,
+        }}
+      >
+        <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
+        <span style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>Sit</span>
+      </motion.button>
     );
   }
 
-  const isBetting = state.phase === 'BETTING';
-  const isSelectedForBet = state.bettingSeatId === seat.id;
-  const currentBet = seat.hands[0]?.bet || 0;
+  const activeHand = seat.hands[seat.activeHandIndex];
 
-  const handleSideBetClick = (sb: keyof SideBets) => {
-    if (!isBetting) return;
-    dispatch({ type: 'PLACE_SIDE_BET', seatId: seat.id, betType: sb, amount: 25 }); // default 25 for quick placement
-  };
-  
   return (
-    <div className={`flex flex-col items-center justify-end w-24 md:w-36 relative transition-all ${isSelectedForBet ? 'scale-110 z-20' : 'z-10'}`}>
-      
-      {state.phase === 'INSURANCE' && state.activeSeatIndex === seat.id && (
-        <div className="absolute top-[-100px] left-1/2 -translate-x-1/2 bg-card border border-primary/50 rounded-lg p-3 w-48 shadow-2xl z-50 flex flex-col items-center">
-          <p className="text-xs uppercase font-bold text-primary mb-2 text-center">Insurance?</p>
-          <div className="flex gap-2 w-full">
-             <button onClick={() => dispatch({ type: 'INSURANCE' })} disabled={bankroll < (currentBet/2)} className="flex-1 py-1 bg-primary text-black font-bold text-xs rounded hover:bg-primary/90 disabled:opacity-50">Buy</button>
-             <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })} className="flex-1 py-1 bg-secondary text-white font-bold text-xs rounded hover:bg-secondary/90">Decline</button>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+
+      {/* Insurance prompt */}
+      {state.phase === 'INSURANCE' && state.activeSeatIndex === seatIndex && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+          style={{
+            position: 'absolute',
+            bottom: '110%', left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(6,10,8,0.97)',
+            border: '1px solid rgba(212,168,32,0.5)',
+            borderRadius: 8, padding: '10px 14px',
+            textAlign: 'center', zIndex: 50,
+            minWidth: 140,
+            boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
+          }}
+        >
+          <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#d4a820', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>
+            Insurance?
           </div>
-        </div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>
+            Max ${Math.floor(currentBet / 2)}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => dispatch({ type: 'INSURANCE' })}
+              style={{ flex: 1, padding: '4px 0', background: '#d4a820', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', letterSpacing: '0.1em', fontFamily: 'sans-serif' }}>
+              Buy
+            </button>
+            <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })}
+              style={{ flex: 1, padding: '4px 0', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.65)', fontWeight: 700, fontSize: 10, borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', fontFamily: 'sans-serif' }}>
+              Skip
+            </button>
+          </div>
+        </motion.div>
       )}
 
-      {seat.sideBetResults?.map((res: any, idx: number) => (
-         <motion.div 
-           key={`side-res-${idx}`}
-           initial={{ opacity: 0, y: 0 }}
-           animate={{ opacity: 1, y: -40 - (idx * 20) }}
-           className={`absolute z-40 top-0 left-1/2 -translate-x-1/2 -translate-y-full px-2 py-0.5 rounded border shadow-xl font-bold uppercase tracking-wider text-[10px] whitespace-nowrap
-             ${res.win ? 'bg-primary/20 border-primary text-primary' : 'bg-red-900/50 border-red-500/50 text-red-200'}`}
-         >
-           {res.betName}: {res.win ? `+$${res.payout}` : '-'}
-         </motion.div>
-      ))}
-
-      {seat.hands.map((hand: Hand) => (
-         hand.result && (
-           <motion.div 
-             key={`result-${hand.id}`}
-             initial={{ opacity: 0, y: 20, scale: 0.8 }}
-             animate={{ opacity: 1, y: 0, scale: 1 }}
-             className={`absolute z-40 top-0 left-1/2 -translate-x-1/2 -translate-y-full mb-4 px-3 py-1 rounded border shadow-xl font-bold uppercase tracking-wider text-xs whitespace-nowrap
-               ${hand.result === 'win' || hand.result === 'blackjack_win' ? 'bg-green-900 border-green-500 text-green-100' : 
-                 hand.result === 'push' ? 'bg-gray-800 border-gray-500 text-gray-200' : 
-                 hand.result === 'surrender' ? 'bg-gray-800 border-yellow-500 text-yellow-200' :
-                 'bg-red-900 border-red-500 text-red-100'}`}
-           >
-             {hand.result === 'blackjack_win' ? 'Blackjack!' : hand.result}
-             {hand.payout ? ` +$${hand.payout}` : (hand.result === 'lose' || hand.result === 'bust' ? ` -$${hand.bet}` : '')}
-           </motion.div>
-         )
-      ))}
-
-      <div className="h-32 md:h-40 relative flex justify-center items-end mb-2 w-full">
+      {/* Player hands (cards) */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
         {seat.hands.map((hand: Hand, hIdx: number) => {
-           const isActiveHand = ['PLAYER_TURN', 'INSURANCE'].includes(state.phase) && state.activeSeatIndex === seat.id && seat.activeHandIndex === hIdx;
-           return (
-             <div key={hand.id} className={`absolute bottom-0 transition-all ${seat.hands.length > 1 ? (hIdx === 0 ? '-translate-x-6 md:-translate-x-8' : 'translate-x-6 md:translate-x-8') : ''} ${isActiveHand ? 'scale-110 z-20 drop-shadow-[0_0_15px_rgba(223,169,56,0.3)]' : 'z-10 opacity-90'}`}>
-               <div className="relative flex justify-center w-16 md:w-20 h-24 md:h-32">
-                 {hand.cards.map((card: Card, cIdx: number) => (
-                   <div key={cIdx} className="absolute top-0" style={{ transform: `translateY(${cIdx * -20}px)` }}>
-                      <PlayingCard card={card} index={cIdx} stacked={true} />
-                   </div>
-                 ))}
-                 {hand.cards.length > 0 && (
-                    <div className="absolute -bottom-3 bg-black/60 border border-white/20 text-white px-2 py-0.5 rounded text-[10px] font-bold z-30">
-                      {calculateHandValue(hand.cards).total}
-                    </div>
-                 )}
-               </div>
-             </div>
-           )
-        })}
-      </div>
+          const isThisHand = isPlayerTurn && seat.activeHandIndex === hIdx;
+          const val = calculateHandValue(hand.cards);
 
-      <div className="flex flex-wrap justify-center gap-1 mb-3 w-full min-h-8">
-        {config.sideBets.filter(sb => sb !== 'insurance').map(sb => {
-          const amount = (seat.sideBets as any)[sb] || 0;
           return (
-            <button 
-              key={sb} 
-              onClick={() => handleSideBetClick(sb as keyof SideBets)}
-              className={`w-8 h-8 rounded-full border flex items-center justify-center text-[8px] relative transition-all ${isBetting ? 'hover:border-primary cursor-pointer' : 'cursor-default'} ${amount > 0 ? 'bg-primary text-black font-bold border-primary' : 'bg-black/40 text-primary-foreground border-primary/40'}`}
-              title={isBetting ? `Add $25 to ${sb}` : sb}
-            >
-               {sb.substring(0,2).toUpperCase()}
-               {amount > 0 && <div className="absolute -top-3 right-0 text-[8px] bg-black text-white px-1 rounded font-mono border border-border">${amount}</div>}
-            </button>
-          )
+            <div key={hand.id} style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              opacity: state.phase === 'PLAYER_TURN' && !isThisHand ? 0.6 : 1,
+              transition: 'opacity 0.25s',
+            }}>
+              {/* Result badge */}
+              <AnimatePresence>
+                {hand.result && (
+                  <motion.div
+                    key={`res-${hand.id}`}
+                    initial={{ opacity: 0, scale: 0.5, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    style={{
+                      padding: '3px 9px',
+                      borderRadius: 4,
+                      fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
+                      textTransform: 'uppercase', fontFamily: 'sans-serif',
+                      whiteSpace: 'nowrap',
+                      ...(hand.result === 'blackjack_win'
+                        ? { background: 'rgba(212,168,32,0.92)', color: '#000', border: '1px solid #d4a820' }
+                        : hand.result === 'win'
+                        ? { background: 'rgba(25,110,55,0.92)', color: '#fff', border: '1px solid rgba(50,180,80,0.5)' }
+                        : hand.result === 'push'
+                        ? { background: 'rgba(70,70,70,0.92)', color: '#ddd', border: '1px solid rgba(150,150,150,0.4)' }
+                        : hand.result === 'surrender'
+                        ? { background: 'rgba(140,90,10,0.92)', color: '#fff', border: '1px solid rgba(180,140,40,0.5)' }
+                        : { background: 'rgba(120,20,20,0.92)', color: '#fff', border: '1px solid rgba(200,50,50,0.4)' }),
+                    }}
+                  >
+                    {hand.result === 'blackjack_win'
+                      ? '♠ BLACKJACK'
+                      : hand.result === 'win'
+                      ? `WIN +$${hand.payout ?? hand.bet}`
+                      : hand.result === 'push'
+                      ? 'PUSH'
+                      : hand.result === 'surrender'
+                      ? 'SURRENDER'
+                      : hand.result === 'bust'
+                      ? 'BUST'
+                      : `LOSE -$${hand.bet}`}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Cards */}
+              <div style={{
+                position: 'relative',
+                height: Math.max(88, 88 + (hand.cards.length - 1) * 17),
+                width: Math.max(62, 62 + (hand.cards.length - 1) * 17),
+              }}>
+                {hand.cards.map((card: Card, cIdx: number) => (
+                  <motion.div
+                    key={cIdx}
+                    initial={{ x: 90, y: -80, opacity: 0, rotate: 18 }}
+                    animate={{ x: cIdx * 17, y: 0, opacity: 1, rotate: 0 }}
+                    transition={{ delay: cIdx * 0.07, type: 'spring', stiffness: 300, damping: 26 }}
+                    style={{ position: 'absolute', top: 0 }}
+                  >
+                    <PlayingCard card={card} />
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* Hand value badge */}
+              {hand.cards.length > 0 && (
+                <div style={{
+                  background: 'rgba(0,0,0,0.68)',
+                  border: `1px solid ${isThisHand ? 'rgba(212,168,32,0.7)' : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 12, padding: '2px 8px',
+                  fontSize: 11, fontWeight: 700, fontFamily: 'sans-serif',
+                  color: val.total > 21
+                    ? '#e05050'
+                    : val.total === 21
+                    ? '#d4a820'
+                    : 'rgba(255,255,255,0.78)',
+                }}>
+                  {val.total}
+                  {val.soft && val.total < 21 ? `/${val.total - 10}` : ''}
+                  {val.total > 21 ? ' bust' : ''}
+                </div>
+              )}
+            </div>
+          );
         })}
       </div>
 
-      <button 
-        onClick={isBetting ? handleSelectBet : undefined}
-        className={`w-16 h-16 md:w-20 md:h-20 rounded-full border-4 flex items-center justify-center transition-all relative ${isBetting ? 'cursor-pointer hover:bg-white/5' : 'cursor-default'} ${isSelectedForBet ? 'border-primary shadow-[0_0_15px_rgba(223,169,56,0.5)] bg-primary/10' : 'border-primary/40 bg-black/20'}`}
+      {/* Side bet result tags */}
+      <AnimatePresence>
+        {(seat.sideBetResults || []).filter((r: any) => r.win).map((res: any, idx: number) => (
+          <motion.div
+            key={`sbr-${idx}`}
+            initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+            style={{
+              fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: '#d4a820', fontFamily: 'sans-serif', fontWeight: 700,
+            }}
+          >
+            {res.betName} +${res.payout}
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      {/* Seat circle with bet chips */}
+      <motion.div
+        data-testid={`seat-${seatIndex}`}
+        onClick={() => {
+          if (state.phase === 'BETTING') dispatch({ type: 'SELECT_BET_SEAT', seatId: seatIndex });
+        }}
+        animate={{
+          boxShadow: isPlayerTurn
+            ? ['0 0 0 3px rgba(212,168,32,0.9), 0 0 22px rgba(212,168,32,0.5)', '0 0 0 4px rgba(212,168,32,0.6), 0 0 30px rgba(212,168,32,0.3)', '0 0 0 3px rgba(212,168,32,0.9), 0 0 22px rgba(212,168,32,0.5)']
+            : isSelectedBetSeat
+            ? '0 0 0 2px rgba(212,168,32,0.5), 0 0 12px rgba(212,168,32,0.2)'
+            : '0 0 0 2px rgba(255,255,255,0.14)',
+        }}
+        transition={{ repeat: isPlayerTurn ? Infinity : 0, duration: 1.5 }}
+        style={{
+          width: 66, height: 66, borderRadius: '50%',
+          background: isPlayerTurn
+            ? 'rgba(212,168,32,0.1)'
+            : 'rgba(0,0,0,0.3)',
+          cursor: state.phase === 'BETTING' ? 'pointer' : 'default',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+          transition: 'background 0.2s',
+        }}
       >
-        {seat.sideBets.insurance > 0 && (
-          <div className="absolute -left-6 top-0 w-8 h-8 bg-blue-900 border border-blue-400 rounded-full flex items-center justify-center text-[8px] font-bold text-white shadow-lg z-20">
-             INS<br/>${seat.sideBets.insurance}
-          </div>
-        )}
         {currentBet > 0 ? (
           <ChipStack amount={currentBet} />
         ) : (
-          <span className="text-white/20 text-xs md:text-sm uppercase tracking-widest font-bold">Bet</span>
+          <span style={{
+            fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
+            color: 'rgba(255,255,255,0.22)', fontFamily: 'sans-serif', fontWeight: 700,
+          }}>Bet</span>
         )}
-      </button>
 
-      {['PLAYER_TURN', 'INSURANCE'].includes(state.phase) && state.activeSeatIndex === seat.id && (
-        <div className="absolute -bottom-6 w-full flex justify-center pointer-events-none">
-          <div className="w-2 h-2 rounded-full bg-primary animate-ping"></div>
-        </div>
-      )}
+        {/* Insurance indicator */}
+        {(seat.sideBets as any).insurance > 0 && (
+          <div style={{
+            position: 'absolute', top: -6, right: -6,
+            width: 20, height: 20, borderRadius: '50%',
+            background: '#112299', border: '1px solid #4466ee',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 7, color: '#fff', fontWeight: 700, fontFamily: 'sans-serif',
+          }}>IN</div>
+        )}
+      </motion.div>
+
+      {/* Inline action buttons when it's this seat's turn */}
+      <AnimatePresence>
+        {isPlayerTurn && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              marginTop: 4,
+            }}
+          >
+            {/* Turn indicator */}
+            <div style={{
+              fontSize: 8, letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700,
+            }}>Your turn</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function ControlBar({ state, dispatch, playerName, bankroll, config }: { state: any, dispatch: any, playerName: string, bankroll: number, config: TableConfig }) {
-  const [selectedChip, setSelectedChip] = useState(25);
-  const chips = [1, 5, 25, 100, 500];
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const handlePlaceBet = () => {
-    if (state.bettingSeatId !== undefined) {
-      dispatch({ type: 'PLACE_BET', seatId: state.bettingSeatId, amount: selectedChip });
+const CHIP_AMOUNTS = [1, 5, 25, 100, 500];
+
+function ControlBar({ state, dispatch, playerName, config }: {
+  state: any;
+  dispatch: any;
+  playerName: string;
+  config: TableConfig;
+}) {
+  const [selectedChip, setSelectedChip] = useState(25);
+
+  const activeSeat: Seat | undefined = state.seats[state.activeSeatIndex];
+  const activeHand: Hand | undefined = activeSeat?.hands[activeSeat?.activeHandIndex];
+  const currentBet = activeHand?.bet ?? 0;
+
+  const canDouble = !!activeHand && activeHand.cards.length === 2 && state.bankroll >= currentBet;
+  const canSplit = !!activeHand &&
+    activeHand.cards.length === 2 &&
+    activeHand.cards[0].rank === activeHand.cards[1].rank &&
+    state.bankroll >= currentBet &&
+    (activeSeat?.hands.length ?? 0) < 4;
+  const canSurrender = !!activeHand && activeHand.cards.length === 2;
+  const canDeal = (state.seats as Seat[]).some(s => s.isActive && (s.hands[0]?.bet ?? 0) >= config.minBet);
+  const anyActive = (state.seats as Seat[]).some(s => s.isActive);
+
+  const handleChipClick = (amount: number) => {
+    setSelectedChip(amount);
+    const bettingSeatId = state.bettingSeatId;
+    if (state.phase === 'BETTING' && bettingSeatId !== undefined) {
+      dispatch({ type: 'PLACE_BET', seatId: bettingSeatId, amount });
     }
   };
 
-  const handleDeal = () => {
-    dispatch({ type: 'DEAL' });
+  const sideBetoptions = config.sideBets.filter(sb => sb !== 'insurance');
+  const sideBetLabels: Record<string, string> = {
+    perfectPairs: 'Pairs',
+    twentyOnePlusThree: '21+3',
+    luckyLadies: 'Lucky Q',
+    superSevens: '7s',
+    luckyLucky: 'Lucky',
+    royalMatch: 'Royal',
+    bustIt: 'Bust It',
   };
 
-  const canDeal = state.seats.some((s: Seat) => s.isActive && (s.hands[0]?.bet || 0) >= config.minBet);
-
-  const activeSeat = state.seats[state.activeSeatIndex];
-  const activeHand = activeSeat?.hands[activeSeat?.activeHandIndex];
-  const canDouble = activeHand && activeHand.cards.length === 2 && bankroll >= activeHand.bet;
-  const canSplit = activeHand && activeHand.cards.length === 2 && activeHand.cards[0].value === activeHand.cards[1].value && bankroll >= activeHand.bet;
-  const canSurrender = activeHand && activeHand.cards.length === 2;
-
   return (
-    <div className="h-28 md:h-32 w-full bg-card border-t border-border z-30 flex items-center justify-between px-4 md:px-8 shrink-0">
-      <div className="flex flex-col w-32 md:w-48">
-        <span className="text-muted-foreground uppercase tracking-widest text-[10px] md:text-xs font-bold">{playerName}</span>
-        <span className="text-xl md:text-2xl font-mono text-primary font-bold shadow-sm">${bankroll.toLocaleString()}</span>
-        <div className="w-full max-w-[120px] h-1 bg-border rounded-full mt-2 overflow-hidden">
-           <div className="h-full bg-primary/50" style={{ width: `${Math.max(0, (state.shoe?.length || 0) / Math.max(1, (state.shoe?.length || 0) + (state.discard?.length || 0)) * 100)}%` }}></div>
+    <div style={{
+      height: 118,
+      flexShrink: 0,
+      background: 'rgba(2,5,3,0.98)',
+      borderTop: '1px solid rgba(150,110,30,0.18)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 14px',
+      gap: 10,
+      zIndex: 30,
+    }}>
+
+      {/* ── LEFT: Bankroll ── */}
+      <div style={{ minWidth: 110, flexShrink: 0 }}>
+        <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.35)', fontFamily: 'sans-serif' }}>
+          {playerName}
         </div>
-        <span className="text-[8px] text-muted-foreground uppercase mt-1">Shoe</span>
+        <div style={{ fontSize: 24, fontWeight: 700, color: '#d4a820', fontFamily: 'sans-serif', letterSpacing: '-0.01em', marginTop: 2 }}>
+          ${state.bankroll.toLocaleString()}
+        </div>
+        {state.bankroll < config.minBet && state.phase === 'BETTING' && (
+          <button
+            onClick={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
+            style={{
+              marginTop: 4, fontSize: 9, color: '#d4a820', fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.1em',
+              background: 'none', border: '1px solid rgba(212,168,32,0.4)',
+              borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontFamily: 'sans-serif',
+            }}
+          >+$1,000</button>
+        )}
       </div>
 
-      <div className="flex-1 flex justify-center items-center h-full px-2">
-        {state.phase === 'SEAT_SELECTION' && (
-          <div className="text-muted-foreground text-sm uppercase tracking-wider font-semibold animate-pulse">Select a seat to join</div>
-        )}
-        
-        {state.phase === 'BETTING' && state.seats.some((s: Seat) => s.isActive) && (
-          <div className="flex flex-col items-center w-full max-w-lg gap-2">
-            <div className="flex items-center justify-center gap-2 md:gap-4 mb-2">
-              {chips.map(amount => (
-                <button 
-                  key={amount}
-                  onClick={() => setSelectedChip(amount)}
-                  className={`relative transition-all hover:-translate-y-2 ${selectedChip === amount ? '-translate-y-4 scale-110 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]' : 'scale-90 opacity-80'}`}
-                >
-                  <Chip amount={amount} />
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex items-center gap-2 w-full max-w-[300px]">
-               <button 
-                 onClick={handlePlaceBet}
-                 disabled={state.bettingSeatId === undefined || bankroll < selectedChip}
-                 className="flex-1 py-2 md:py-3 bg-secondary text-secondary-foreground rounded uppercase tracking-wider text-[10px] md:text-xs font-bold hover:bg-secondary/80 disabled:opacity-50 border border-border"
-               >
-                 Bet
-               </button>
-               {canDeal && (
-                 <button 
-                   onClick={handleDeal}
-                   className="flex-1 py-2 md:py-3 bg-primary text-primary-foreground rounded uppercase tracking-wider text-[10px] md:text-xs font-bold hover:bg-primary/90 shadow-[0_0_10px_rgba(223,169,56,0.3)]"
-                 >
-                   Deal
-                 </button>
-               )}
-            </div>
+      {/* ── CENTER: Main controls ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+
+        {/* Chip tray (betting phase) */}
+        {(state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION') && anyActive && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5 }}>
+            {CHIP_AMOUNTS.map(amount => (
+              <div
+                key={amount}
+                data-testid={`chip-${amount}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleChipClick(amount)}
+                onKeyDown={e => e.key === 'Enter' && handleChipClick(amount)}
+                style={{
+                  border: 'none', background: 'none', cursor: 'pointer', padding: 0,
+                  transform: selectedChip === amount ? 'translateY(-7px) scale(1.14)' : 'scale(0.95)',
+                  transition: 'transform 0.15s',
+                  filter: selectedChip === amount ? 'drop-shadow(0 4px 10px rgba(255,255,255,0.25))' : 'none',
+                }}
+              >
+                <Chip amount={amount} size={selectedChip === amount ? 50 : 42} />
+              </div>
+            ))}
           </div>
         )}
 
-        {state.phase === 'PLAYER_TURN' && (
-           <div className="flex items-center gap-1 md:gap-4">
-             <ActionButton onClick={() => {
-                dispatch({ type: 'HIT' }); 
-                dispatch({ type: 'CARD_DEALT', to: 'player', seatId: activeSeat.id });
-             }} label="Hit" />
-             <ActionButton onClick={() => dispatch({ type: 'STAND' })} label="Stand" />
-             <ActionButton onClick={() => {
-                dispatch({ type: 'DOUBLE' });
-                dispatch({ type: 'CARD_DEALT', to: 'player', seatId: activeSeat.id });
-                setTimeout(() => {
-                   dispatch({ type: 'NEXT_HAND' });
-                }, 500);
-             }} label="Double" disabled={!canDouble} />
-             <ActionButton onClick={() => {
-                dispatch({ type: 'SPLIT' });
-                dispatch({ type: 'CARD_DEALT', to: 'player', seatId: activeSeat.id });
-             }} label="Split" disabled={!canSplit} />
-             <ActionButton onClick={() => dispatch({ type: 'SURRENDER' })} label="Surrender" disabled={!canSurrender} />
-           </div>
+        {/* Bet controls */}
+        {state.phase === 'BETTING' && (
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+            <button
+              data-testid="button-clear-bets"
+              onClick={() => dispatch({ type: 'CLEAR_BETS' })}
+              style={ghostBtn}
+            >Clear</button>
+            {canDeal && (
+              <button
+                data-testid="button-deal"
+                onClick={() => dispatch({ type: 'DEAL' })}
+                style={goldBtn}
+              >Deal</button>
+            )}
+          </div>
         )}
-        
-        {state.phase === 'SETTLEMENT' && (
-           <button 
-             onClick={() => dispatch({ type: 'NEXT_ROUND' })}
-             className="px-8 py-3 bg-primary text-primary-foreground rounded uppercase tracking-widest text-sm font-bold shadow-lg animate-pulse"
-           >
-             Next Round
-           </button>
+
+        {/* Player action buttons */}
+        {state.phase === 'PLAYER_TURN' && (
+          <div style={{ display: 'flex', gap: 5 }}>
+            <button data-testid="button-hit" onClick={() => dispatch({ type: 'HIT' })} style={actionBtn(false)}>Hit</button>
+            <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND' })} style={actionBtn(false)}>Stand</button>
+            <button data-testid="button-double" onClick={() => canDouble && dispatch({ type: 'DOUBLE' })} style={actionBtn(!canDouble)}>Double</button>
+            <button data-testid="button-split" onClick={() => canSplit && dispatch({ type: 'SPLIT' })} style={actionBtn(!canSplit)}>Split</button>
+            <button data-testid="button-surrender" onClick={() => canSurrender && dispatch({ type: 'SURRENDER' })} style={actionBtn(!canSurrender)}>Surr.</button>
+          </div>
+        )}
+
+        {/* Next round */}
+        {state.phase === 'SETTLEMENT' && (state as any).settled && (
+          <motion.button
+            data-testid="button-next-round"
+            onClick={() => dispatch({ type: 'NEXT_ROUND' })}
+            animate={{ boxShadow: ['0 4px 14px rgba(212,168,32,0.3)', '0 4px 24px rgba(212,168,32,0.6)', '0 4px 14px rgba(212,168,32,0.3)'] }}
+            transition={{ repeat: Infinity, duration: 1.4 }}
+            style={goldBtn}
+          >Next Round</motion.button>
+        )}
+
+        {state.phase === 'INSURANCE' && (
+          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif' }}>
+            Insurance offered — respond at your seat
+          </div>
+        )}
+
+        {state.phase === 'DEALING' && (
+          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.45)', fontFamily: 'sans-serif' }}>
+            Dealing…
+          </div>
         )}
       </div>
 
-      <div className="flex flex-col items-end w-32 md:w-48">
-         {state.phase === 'BETTING' && state.seats.some((s: Seat) => s.isActive) && (
-           <button 
-             onClick={() => dispatch({ type: 'CLEAR_BETS' })}
-             className="text-xs text-muted-foreground uppercase tracking-wider hover:text-foreground mb-2"
-           >
-             Clear Bets
-           </button>
-         )}
-         {state.bankroll === 0 && state.phase === 'BETTING' && (
-           <button onClick={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })} className="text-[10px] md:text-xs text-primary font-bold uppercase hover:underline py-1 px-3 border border-primary/30 rounded">
-             Buy $1000
-           </button>
-         )}
+      {/* ── RIGHT: Side bets ── */}
+      <div style={{ minWidth: 120, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+        {state.phase === 'BETTING' && state.bettingSeatId !== undefined && sideBetoptions.length > 0 && (
+          <>
+            <div style={{ fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', fontFamily: 'sans-serif' }}>Side Bets</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end', maxWidth: 130 }}>
+              {sideBetoptions.map(sb => {
+                const seat = state.bettingSeatId !== undefined ? state.seats[state.bettingSeatId] : null;
+                const placed = seat ? ((seat.sideBets as any)[sb] || 0) : 0;
+                return (
+                  <button
+                    key={sb}
+                    data-testid={`sidebet-${sb}`}
+                    onClick={() => {
+                      if (state.bettingSeatId !== undefined) {
+                        dispatch({ type: 'PLACE_SIDE_BET', seatId: state.bettingSeatId, betType: sb as keyof SideBets, amount: selectedChip });
+                      }
+                    }}
+                    style={{
+                      padding: '3px 7px', fontSize: 8, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      fontWeight: 700, fontFamily: 'sans-serif',
+                      background: placed > 0 ? 'rgba(212,168,32,0.22)' : 'rgba(255,255,255,0.05)',
+                      border: placed > 0 ? '1px solid rgba(212,168,32,0.55)' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 4,
+                      color: placed > 0 ? '#d4a820' : 'rgba(255,255,255,0.38)',
+                      cursor: 'pointer',
+                    }}
+                    title={`$${selectedChip} on ${sb}`}
+                  >
+                    {sideBetLabels[sb] || sb}{placed > 0 ? ` $${placed}` : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function ActionButton({ onClick, label, disabled }: { onClick: () => void, label: string, disabled?: boolean }) {
-  return (
-    <button 
-      onClick={onClick} 
-      disabled={disabled}
-      className="px-2 py-2 md:px-5 md:py-3 bg-card border border-border hover:bg-secondary text-foreground uppercase tracking-wider md:tracking-widest text-[10px] md:text-xs font-bold rounded shadow-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-    >
-      {label}
-    </button>
-  );
+// ── Shared button styles ──────────────────────────────────────────────────────
+const goldBtn: CSSProperties = {
+  padding: '7px 26px', fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase',
+  fontWeight: 700, fontFamily: 'sans-serif',
+  background: 'linear-gradient(135deg, #c49a10, #e6c038)',
+  border: 'none', borderRadius: 4, color: '#000', cursor: 'pointer',
+  boxShadow: '0 2px 12px rgba(212,168,32,0.3)',
+};
+
+const ghostBtn: CSSProperties = {
+  padding: '7px 16px', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+  fontWeight: 700, fontFamily: 'sans-serif',
+  background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 4, color: 'rgba(255,255,255,0.45)', cursor: 'pointer',
+};
+
+function actionBtn(disabled: boolean): CSSProperties {
+  return {
+    padding: '7px 14px', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
+    fontWeight: 700, fontFamily: 'sans-serif',
+    background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.08)',
+    border: disabled ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(255,255,255,0.18)',
+    borderRadius: 4,
+    color: disabled ? 'rgba(255,255,255,0.18)' : '#f0e6c8',
+    cursor: disabled ? 'default' : 'pointer',
+    transition: 'background 0.12s',
+  };
 }

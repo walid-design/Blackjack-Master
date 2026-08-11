@@ -1,18 +1,20 @@
 import { GameState, GameAction } from './types';
-import { calculateHandValue, isBlackjack, TableConfig, Card, buildShoe, shuffle, Hand, Seat, evaluateBustIt, evaluate21Plus3, evaluateLuckyLadies, evaluateLuckyLucky, evaluatePerfectPairs, evaluateRoyalMatch, evaluateSuperSevens } from './blackjack';
+import {
+  calculateHandValue, isBlackjack, TableConfig, Card, buildShoe, shuffle, Hand, Seat,
+  evaluateBustIt, evaluate21Plus3, evaluateLuckyLadies, evaluateLuckyLucky,
+  evaluatePerfectPairs, evaluateRoyalMatch, evaluateSuperSevens
+} from './blackjack';
 
 export function createInitialState(table: TableConfig, initialBankroll: number): GameState {
-  const seats = Array.from({ length: table.seats }).map((_, i) => ({
+  const seats: Seat[] = Array.from({ length: table.seats }, (_, i) => ({
     id: i,
     isActive: false,
     hands: [],
     activeHandIndex: 0,
     sideBets: {},
-    sideBetResults: []
+    sideBetResults: [],
   }));
-
   const shoe = shuffle(buildShoe(table.decks));
-
   return {
     phase: 'SEAT_SELECTION',
     shoe,
@@ -23,404 +25,556 @@ export function createInitialState(table: TableConfig, initialBankroll: number):
     activeSeatIndex: -1,
     cutCardIndex: Math.floor(shoe.length * 0.25),
     needsShuffle: false,
-    bankroll: initialBankroll
+    bankroll: initialBankroll,
+    bettingSeatId: undefined,
   };
 }
 
-export function gameReducer(state: GameState, action: GameAction | { type: 'DEALER_TICK' } | { type: 'PERFORM_SETTLEMENT' } | { type: 'RESOLVE_INSURANCE' } | { type: 'END_INSURANCE' }): GameState {
+type ExtendedAction = GameAction
+  | { type: 'PERFORM_SETTLEMENT' }
+  | { type: 'DEALER_PLAY' };
+
+export function gameReducer(state: GameState, action: ExtendedAction): GameState {
   switch (action.type) {
+    // ── Seat management ──────────────────────────────────────────────────────
     case 'SIT': {
-      const s = { ...state };
-      s.seats = [...s.seats];
+      const s = { ...state, seats: [...state.seats] };
       s.seats[action.seatId] = { ...s.seats[action.seatId], isActive: true };
-      if (s.phase === 'SEAT_SELECTION') s.phase = 'BETTING';
+      if (s.phase === 'SEAT_SELECTION') {
+        s.phase = 'BETTING';
+        s.bettingSeatId = action.seatId;
+      }
       return s;
     }
     case 'LEAVE': {
-      const s = { ...state };
-      s.seats = [...s.seats];
-      s.seats[action.seatId] = { ...s.seats[action.seatId], isActive: false, hands: [], sideBets: {} };
-      if (s.seats.every(seat => !seat.isActive)) {
-        s.phase = 'SEAT_SELECTION';
-      }
+      const s = { ...state, seats: [...state.seats] };
+      const seat = s.seats[action.seatId];
+      // Return un-deducted bet to bankroll
+      const returnBet = seat.hands[0]?.bet || 0;
+      const returnSide = Object.values(seat.sideBets).reduce((a: number, b) => a + (b as number), 0);
+      s.bankroll += returnBet + returnSide;
+      s.seats[action.seatId] = { ...seat, isActive: false, hands: [], sideBets: {}, sideBetResults: [] };
+      if (s.seats.every(st => !st.isActive)) s.phase = 'SEAT_SELECTION';
       return s;
     }
     case 'SELECT_BET_SEAT': {
       return { ...state, bettingSeatId: action.seatId };
     }
+
+    // ── Betting ──────────────────────────────────────────────────────────────
     case 'PLACE_BET': {
       const { seatId, amount } = action;
       if (state.bankroll < amount) return state;
-      const s = { ...state };
-      s.bankroll -= amount;
-      s.seats = [...s.seats];
+      const s = { ...state, seats: [...state.seats], bankroll: state.bankroll - amount };
       const seat = { ...s.seats[seatId] };
       const currentBet = seat.hands[0]?.bet || 0;
-      seat.hands = [{ id: Math.random().toString(), cards: [], bet: currentBet + amount, status: 'playing', isSplit: false, doubled: false }];
+      seat.hands = [{
+        id: seat.hands[0]?.id || Math.random().toString(36),
+        cards: [],
+        bet: currentBet + amount,
+        status: 'playing',
+        isSplit: false,
+        doubled: false,
+      }];
       s.seats[seatId] = seat;
       return s;
     }
     case 'PLACE_SIDE_BET': {
       const { seatId, betType, amount } = action;
       if (state.bankroll < amount) return state;
-      const s = { ...state };
-      s.bankroll -= amount;
-      s.seats = [...s.seats];
-      const seat = { ...s.seats[seatId] };
-      seat.sideBets = { ...seat.sideBets };
-      seat.sideBets[betType] = (seat.sideBets[betType] || 0) + amount;
+      const s = { ...state, seats: [...state.seats], bankroll: state.bankroll - amount };
+      const seat = { ...s.seats[seatId], sideBets: { ...s.seats[seatId].sideBets } };
+      seat.sideBets[betType] = ((seat.sideBets[betType] || 0) as number) + amount;
       s.seats[seatId] = seat;
       return s;
     }
-    case 'CLEAR_BETS': {
-      const s = { ...state };
-      let returned = 0;
-      s.seats = s.seats.map(seat => {
-        if (!seat.isActive) return seat;
-        returned += (seat.hands[0]?.bet || 0) + Object.values(seat.sideBets).reduce((a, b) => (a as number) + (b as number), 0) as number;
-        return { ...seat, hands: [], sideBets: {} };
-      });
-      s.bankroll += returned;
-      return s;
+    case 'REMOVE_LAST_BET': {
+      return state; // handled by CLEAR_BETS
     }
+    case 'CLEAR_BETS': {
+      let returned = 0;
+      const seats = state.seats.map(seat => {
+        if (!seat.isActive) return seat;
+        returned += (seat.hands[0]?.bet || 0);
+        returned += Object.values(seat.sideBets).reduce((a: number, b) => a + (b as number), 0);
+        return { ...seat, hands: [], sideBets: {}, sideBetResults: [] };
+      });
+      return { ...state, seats, bankroll: state.bankroll + returned };
+    }
+
+    // ── Dealing ──────────────────────────────────────────────────────────────
     case 'DEAL': {
-      return { ...state, phase: 'DEALING', dealerCards: [], dealerStatus: 'playing' };
+      // Reset dealer, keep seat bets, transition to DEALING
+      return {
+        ...state,
+        phase: 'DEALING',
+        dealerCards: [],
+        dealerStatus: 'playing',
+        activeSeatIndex: -1,
+        seats: state.seats.map(seat => {
+          if (!seat.isActive) return seat;
+          const bet = seat.hands[0]?.bet || 0;
+          if (bet === 0) return seat;
+          return {
+            ...seat,
+            activeHandIndex: 0,
+            sideBetResults: [],
+            hands: [{
+              id: Math.random().toString(36),
+              cards: [],
+              bet,
+              status: 'playing',
+              isSplit: false,
+              doubled: false,
+            }],
+          };
+        }),
+      };
     }
     case 'CARD_DEALT': {
-      const s = { ...state };
-      s.shoe = [...s.shoe];
+      const s = { ...state, shoe: [...state.shoe] };
       const card = s.shoe.pop();
       if (!card) return s;
-
-      if (s.shoe.length <= s.cutCardIndex) {
-        s.needsShuffle = true;
-      }
-
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
       s.seats = [...s.seats];
-      if (action.to === 'player' && action.seatId !== undefined) {
-        const seatId = action.seatId;
-        const seat = { ...s.seats[seatId] };
-        seat.hands = [...seat.hands];
-        const handIdx = seat.activeHandIndex;
-        const hand = { ...seat.hands[handIdx] };
-        hand.cards = [...hand.cards, card];
-        seat.hands[handIdx] = hand;
-        s.seats[seatId] = seat;
 
-        const val = calculateHandValue(hand.cards);
-        if (val.total >= 21 && s.phase === 'PLAYER_TURN') {
-          hand.status = val.total === 21 ? (hand.cards.length === 2 ? 'blackjack' : 'stood') : 'busted';
-          seat.hands[handIdx] = hand;
-          s.seats[seatId] = seat;
-          return moveToNextHand(s);
-        }
-
-      } else if (action.to === 'dealer') {
+      if (action.to === 'dealer') {
         s.dealerCards = [...s.dealerCards, card];
+      } else if (action.to === 'player' && action.seatId !== undefined) {
+        const sid = action.seatId;
+        const seat = { ...s.seats[sid], hands: [...s.seats[sid].hands] };
+        const hi = seat.activeHandIndex;
+        const hand = { ...seat.hands[hi], cards: [...seat.hands[hi].cards, card] };
+        seat.hands[hi] = hand;
+        s.seats[sid] = seat;
+
+        if (s.phase === 'PLAYER_TURN') {
+          const val = calculateHandValue(hand.cards);
+          if (val.total > 21) {
+            hand.status = 'busted';
+            seat.hands[hi] = hand;
+            s.seats[sid] = seat;
+            return moveToNextHand(s);
+          }
+          if (val.total === 21) {
+            hand.status = 'stood';
+            seat.hands[hi] = hand;
+            s.seats[sid] = seat;
+            return moveToNextHand(s);
+          }
+        }
       }
       return s;
     }
+
+    // ── Dealer BJ check / insurance ──────────────────────────────────────────
     case 'CHECK_DEALER_BJ': {
       const s = { ...state };
       const upcard = s.dealerCards[0];
-      
-      if (upcard && upcard.rank === 'A') {
-         s.phase = 'INSURANCE';
-         s.activeSeatIndex = s.seats.findIndex(seat => seat.isActive && seat.hands.length > 0);
-         return s;
+      if (upcard?.rank === 'A') {
+        s.phase = 'INSURANCE';
+        s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
+        return s;
       }
-      
-      if (upcard && upcard.value === 10) {
-         if (isBlackjack(s.dealerCards)) {
-           s.dealerStatus = 'blackjack';
-           s.phase = 'SETTLEMENT';
-           return s;
-         }
+      if (upcard?.value === 10 && isBlackjack(s.dealerCards)) {
+        s.dealerStatus = 'blackjack';
+        s.phase = 'SETTLEMENT';
+        return s;
       }
-      
       s.phase = 'PLAYER_TURN';
-      s.activeSeatIndex = s.seats.findIndex(seat => seat.isActive && seat.hands.length > 0);
-      if (s.activeSeatIndex === -1) {
-        s.phase = 'DEALER_TURN';
-      }
-      return checkSkipPlayerTurn(s);
+      s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
+      if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
+      return checkAllDone(s);
     }
     case 'INSURANCE': {
-       const s = { ...state };
-       const seat = s.seats[s.activeSeatIndex];
-       const hand = seat.hands[0]; // main hand
-       const insAmount = hand.bet / 2;
-       if (s.bankroll < insAmount) return s;
-       
-       s.bankroll -= insAmount;
-       s.seats = [...s.seats];
-       const newSeat = { ...seat, sideBets: { ...seat.sideBets, insurance: insAmount } };
-       s.seats[s.activeSeatIndex] = newSeat;
-       
-       return moveToNextInsuranceHand(s);
+      const s = { ...state, seats: [...state.seats] };
+      const seat = { ...s.seats[s.activeSeatIndex] };
+      const insAmount = Math.floor((seat.hands[0]?.bet || 0) / 2);
+      if (s.bankroll < insAmount || insAmount === 0) return moveToNextInsurance(s);
+      s.bankroll -= insAmount;
+      seat.sideBets = { ...seat.sideBets, insurance: insAmount };
+      s.seats[s.activeSeatIndex] = seat;
+      return moveToNextInsurance(s);
     }
     case 'DECLINE_INSURANCE': {
-       return moveToNextInsuranceHand({ ...state });
+      return moveToNextInsurance({ ...state });
     }
-    case 'END_INSURANCE': {
-       const s = { ...state };
-       if (isBlackjack(s.dealerCards)) {
-          s.dealerStatus = 'blackjack';
-          s.phase = 'SETTLEMENT';
-       } else {
-          s.phase = 'PLAYER_TURN';
-          s.activeSeatIndex = s.seats.findIndex(seat => seat.isActive && seat.hands.length > 0);
-          return checkSkipPlayerTurn(s);
-       }
-       return s;
+
+    // ── Player actions ────────────────────────────────────────────────────────
+    case 'HIT': {
+      const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
+      const card = s.shoe.pop();
+      if (!card) return s;
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
+
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
+      const hi = seat.activeHandIndex;
+      const hand = { ...seat.hands[hi], cards: [...seat.hands[hi].cards, card] };
+      const val = calculateHandValue(hand.cards);
+
+      if (val.total > 21) hand.status = 'busted';
+      else if (val.total === 21) hand.status = 'stood';
+
+      seat.hands[hi] = hand;
+      s.seats[s.activeSeatIndex] = seat;
+
+      if (hand.status !== 'playing') return moveToNextHand(s);
+      return s;
     }
-    case 'HIT': return state; 
     case 'STAND': {
-      const s = { ...state };
-      s.seats = [...s.seats];
-      const seat = { ...s.seats[s.activeSeatIndex] };
-      seat.hands = [...seat.hands];
-      const hand = { ...seat.hands[seat.activeHandIndex] };
-      hand.status = 'stood';
-      seat.hands[seat.activeHandIndex] = hand;
+      const s = { ...state, seats: [...state.seats] };
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
+      seat.hands[seat.activeHandIndex] = { ...seat.hands[seat.activeHandIndex], status: 'stood' };
       s.seats[s.activeSeatIndex] = seat;
       return moveToNextHand(s);
     }
     case 'DOUBLE': {
-       const s = { ...state };
-       const seat = s.seats[s.activeSeatIndex];
-       const hand = seat.hands[seat.activeHandIndex];
-       if (s.bankroll < hand.bet) return s; 
-       s.bankroll -= hand.bet;
-       
-       s.seats = [...s.seats];
-       const newSeat = { ...seat };
-       newSeat.hands = [...seat.hands];
-       const newHand = { ...hand, bet: hand.bet * 2, doubled: true, status: 'stood' }; 
-       newSeat.hands[seat.activeHandIndex] = newHand;
-       s.seats[s.activeSeatIndex] = newSeat;
-       return s; 
+      const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
+      const hi = seat.activeHandIndex;
+      const hand = seat.hands[hi];
+      if (s.bankroll < hand.bet || hand.cards.length !== 2) return s;
+
+      s.bankroll -= hand.bet;
+      const card = s.shoe.pop();
+      if (!card) { s.bankroll += hand.bet; return s; }
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
+
+      const newCards = [...hand.cards, card];
+      const val = calculateHandValue(newCards);
+      seat.hands[hi] = {
+        ...hand,
+        bet: hand.bet * 2,
+        doubled: true,
+        cards: newCards,
+        status: val.total > 21 ? 'busted' : 'stood',
+      };
+      s.seats[s.activeSeatIndex] = seat;
+      return moveToNextHand(s);
     }
     case 'SPLIT': {
-       const s = { ...state };
-       const seat = s.seats[s.activeSeatIndex];
-       const hand = seat.hands[seat.activeHandIndex];
-       if (s.bankroll < hand.bet) return s; 
-       
-       s.bankroll -= hand.bet;
-       
-       s.seats = [...s.seats];
-       const newSeat = { ...seat };
-       newSeat.hands = [...seat.hands];
-       
-       const hand1: Hand = { ...hand, cards: [hand.cards[0]], isSplit: true };
-       const hand2: Hand = { ...hand, id: Math.random().toString(), cards: [hand.cards[1]], isSplit: true };
-       
-       newSeat.hands.splice(seat.activeHandIndex, 1, hand1, hand2);
-       s.seats[s.activeSeatIndex] = newSeat;
-       return s;
+      const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
+      const hi = seat.activeHandIndex;
+      const hand = seat.hands[hi];
+
+      if (
+        s.bankroll < hand.bet ||
+        hand.cards.length !== 2 ||
+        hand.cards[0].rank !== hand.cards[1].rank ||
+        seat.hands.length >= 4
+      ) return s;
+
+      s.bankroll -= hand.bet;
+
+      // Deal one card to each split hand
+      const card1 = s.shoe.pop();
+      const card2 = s.shoe.pop();
+      if (!card1 || !card2) { s.bankroll += hand.bet; return s; }
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
+
+      const isSplitAces = hand.cards[0].rank === 'A';
+
+      const hand1: Hand = {
+        id: Math.random().toString(36),
+        cards: [hand.cards[0], card1],
+        bet: hand.bet,
+        status: isSplitAces ? 'stood' : 'playing',
+        isSplit: true,
+        doubled: false,
+      };
+      const hand2: Hand = {
+        id: Math.random().toString(36),
+        cards: [hand.cards[1], card2],
+        bet: hand.bet,
+        status: isSplitAces ? 'stood' : 'playing',
+        isSplit: true,
+        doubled: false,
+      };
+
+      // Auto-stand on 21
+      if (calculateHandValue(hand1.cards).total === 21) hand1.status = 'stood';
+      if (calculateHandValue(hand2.cards).total === 21) hand2.status = 'stood';
+
+      seat.hands.splice(hi, 1, hand1, hand2);
+      s.seats[s.activeSeatIndex] = seat;
+
+      if (hand1.status !== 'playing') return moveToNextHand(s);
+      return s;
     }
     case 'SURRENDER': {
-      const s = { ...state };
-      s.seats = [...s.seats];
-      const seat = { ...s.seats[s.activeSeatIndex] };
-      seat.hands = [...seat.hands];
+      const s = { ...state, seats: [...state.seats] };
+      const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       const hand = { ...seat.hands[seat.activeHandIndex] };
-      
+      if (hand.cards.length !== 2) return s;
       hand.status = 'surrendered';
-      s.bankroll += hand.bet / 2;
-      
+      s.bankroll += Math.floor(hand.bet / 2);
       seat.hands[seat.activeHandIndex] = hand;
       s.seats[s.activeSeatIndex] = seat;
-      
       return moveToNextHand(s);
     }
     case 'NEXT_HAND': {
-       return moveToNextHand(state);
+      return moveToNextHand(state);
     }
-    case 'DEALER_TICK': {
-      return { ...state, phase: 'DEALER_TICK' as any };
+
+    // ── Dealer ────────────────────────────────────────────────────────────────
+    case 'DEALER_TURN': {
+      return { ...state, phase: 'DEALER_TURN' };
     }
+    case 'DEALER_PLAY': {
+      // Compute all dealer cards at once; animation is handled by stagger in UI
+      const s = { ...state, shoe: [...state.shoe] };
+      let dealerCards = [...s.dealerCards];
+
+      while (true) {
+        const { total } = calculateHandValue(dealerCards);
+        if (total >= 17) break;
+        const card = s.shoe.pop();
+        if (!card) break;
+        dealerCards.push(card);
+      }
+
+      if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
+
+      const finalVal = calculateHandValue(dealerCards);
+      s.dealerCards = dealerCards;
+      s.dealerStatus = finalVal.total > 21 ? 'busted' as any : 'stood' as any;
+      s.phase = 'SETTLEMENT';
+      return s;
+    }
+
+    // ── Settlement ────────────────────────────────────────────────────────────
     case 'SETTLEMENT': {
       return { ...state, phase: 'SETTLEMENT' };
     }
     case 'PERFORM_SETTLEMENT': {
-      const s = { ...state };
-      if ((s as any).settled) return s;
-      (s as any).settled = true;
-      
+      if ((state as any).settled) return state;
+      const s = { ...state } as any;
+      s.settled = true;
+
       const dealerVal = calculateHandValue(s.dealerCards).total;
       const dealerBust = dealerVal > 21;
       const dealerBJ = s.dealerStatus === 'blackjack';
+      const multiDeck = s.dealerCards.length > 0; // always true; use table.decks > 1 ideally
 
-      s.seats = s.seats.map(seat => {
+      s.seats = s.seats.map((seat: Seat) => {
         if (!seat.isActive || seat.hands.length === 0) return seat;
         let wonAmount = 0;
-        
-        const newHands = seat.hands.map(hand => {
+        const sideResults: any[] = [];
+
+        const newHands = seat.hands.map((hand: Hand) => {
+          if (hand.status === 'surrendered') return { ...hand, result: 'surrender' as const };
+
           const val = calculateHandValue(hand.cards).total;
-          const isBJ = isBlackjack(hand.cards);
-          
-          if (hand.status === 'surrendered') {
-            return { ...hand, result: 'surrender' as const };
-          }
-          
-          if (val > 21) {
-            return { ...hand, result: 'bust' as const };
-          }
-          
+          const isBJ = isBlackjack(hand.cards) && !hand.isSplit;
+
+          if (val > 21) return { ...hand, result: 'bust' as const };
           if (isBJ) {
-            if (dealerBJ) {
-              wonAmount += hand.bet;
-              return { ...hand, result: 'push' as const };
-            } else {
-              const payout = hand.bet * 1.5;
-              wonAmount += hand.bet + payout;
-              return { ...hand, result: 'blackjack_win' as const, payout };
-            }
+            if (dealerBJ) { wonAmount += hand.bet; return { ...hand, result: 'push' as const }; }
+            const profit = hand.bet * 1.5;
+            wonAmount += hand.bet + profit;
+            return { ...hand, result: 'blackjack_win' as const, payout: profit };
           }
-          
-          if (dealerBJ) {
-            return { ...hand, result: 'lose' as const };
-          }
-          
-          if (dealerBust) {
-            wonAmount += hand.bet * 2;
-            return { ...hand, result: 'win' as const, payout: hand.bet };
-          }
-          
-          if (val > dealerVal) {
-            wonAmount += hand.bet * 2;
-            return { ...hand, result: 'win' as const, payout: hand.bet };
-          } else if (val === dealerVal) {
-            wonAmount += hand.bet;
-            return { ...hand, result: 'push' as const };
-          } else {
-            return { ...hand, result: 'lose' as const };
-          }
+          if (dealerBJ) return { ...hand, result: 'lose' as const };
+          if (dealerBust) { wonAmount += hand.bet * 2; return { ...hand, result: 'win' as const, payout: hand.bet }; }
+          if (val > dealerVal) { wonAmount += hand.bet * 2; return { ...hand, result: 'win' as const, payout: hand.bet }; }
+          if (val === dealerVal) { wonAmount += hand.bet; return { ...hand, result: 'push' as const }; }
+          return { ...hand, result: 'lose' as const };
         });
-        
-        let sideWon = 0;
-        const sideResults = [];
-        
+
+        // Side bet settlement
+        const firstHand = seat.hands[0];
+        const firstCards = firstHand?.cards || [];
+
+        // Insurance
         if (seat.sideBets.insurance && dealerBJ) {
-           const win = seat.sideBets.insurance * 2;
-           sideWon += seat.sideBets.insurance + win;
-           sideResults.push({ betName: 'Insurance', win: true, payout: win, message: 'Pays 2:1' });
+          const win = (seat.sideBets.insurance as number) * 2;
+          wonAmount += (seat.sideBets.insurance as number) + win;
+          sideResults.push({ betName: 'Insurance', win: true, payout: win, message: 'Pays 2:1' });
         }
-        
-        if (seat.sideBets.perfectPairs) {
-           const res = evaluatePerfectPairs(seat.hands[0].cards, true);
-           if (res.payout > 0) {
-              const win = seat.sideBets.perfectPairs * res.payout;
-              sideWon += seat.sideBets.perfectPairs + win;
-              sideResults.push({ betName: 'Perfect Pairs', win: true, payout: win, message: res.msg });
-           }
+        // Perfect Pairs
+        if (seat.sideBets.perfectPairs && firstCards.length >= 2) {
+          const res = evaluatePerfectPairs(firstCards, true);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.perfectPairs as number) * res.payout;
+            wonAmount += (seat.sideBets.perfectPairs as number) + win;
+            sideResults.push({ betName: 'Perfect Pairs', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Perfect Pairs', win: false, payout: 0, message: 'No pair' });
+          }
         }
-        
-        if (seat.sideBets.twentyOnePlusThree) {
-           const res = evaluate21Plus3(seat.hands[0].cards, s.dealerCards[0], true);
-           if (res.payout > 0) {
-              const win = seat.sideBets.twentyOnePlusThree * res.payout;
-              sideWon += seat.sideBets.twentyOnePlusThree + win;
-              sideResults.push({ betName: '21+3', win: true, payout: win, message: res.msg });
-           }
+        // 21+3
+        if (seat.sideBets.twentyOnePlusThree && firstCards.length >= 2 && s.dealerCards.length >= 1) {
+          const res = evaluate21Plus3(firstCards, s.dealerCards[0], true);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.twentyOnePlusThree as number) * res.payout;
+            wonAmount += (seat.sideBets.twentyOnePlusThree as number) + win;
+            sideResults.push({ betName: '21+3', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: '21+3', win: false, payout: 0, message: 'No match' });
+          }
         }
-        
-        s.bankroll += wonAmount + sideWon;
-        
+        // Lucky Ladies
+        if (seat.sideBets.luckyLadies && firstCards.length >= 2) {
+          const res = evaluateLuckyLadies(firstCards, s.dealerCards, true);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.luckyLadies as number) * res.payout;
+            wonAmount += (seat.sideBets.luckyLadies as number) + win;
+            sideResults.push({ betName: 'Lucky Ladies', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Lucky Ladies', win: false, payout: 0, message: 'No 20' });
+          }
+        }
+        // Super Sevens
+        if (seat.sideBets.superSevens && firstCards.length >= 1) {
+          const handCards = newHands[0]?.cards || firstCards;
+          const res = evaluateSuperSevens(handCards);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.superSevens as number) * res.payout;
+            wonAmount += (seat.sideBets.superSevens as number) + win;
+            sideResults.push({ betName: 'Super Sevens', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Super Sevens', win: false, payout: 0, message: 'No 7' });
+          }
+        }
+        // Lucky Lucky
+        if (seat.sideBets.luckyLucky && firstCards.length >= 2 && s.dealerCards.length >= 1) {
+          const res = evaluateLuckyLucky(firstCards, s.dealerCards[0]);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.luckyLucky as number) * res.payout;
+            wonAmount += (seat.sideBets.luckyLucky as number) + win;
+            sideResults.push({ betName: 'Lucky Lucky', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Lucky Lucky', win: false, payout: 0, message: 'Under 19' });
+          }
+        }
+        // Royal Match
+        if (seat.sideBets.royalMatch && firstCards.length >= 2) {
+          const res = evaluateRoyalMatch(firstCards);
+          if (res.payout > 0) {
+            const win = Math.floor((seat.sideBets.royalMatch as number) * res.payout);
+            wonAmount += (seat.sideBets.royalMatch as number) + win;
+            sideResults.push({ betName: 'Royal Match', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Royal Match', win: false, payout: 0, message: 'Off-suit' });
+          }
+        }
+        // Bust It
+        if (seat.sideBets.bustIt) {
+          const res = evaluateBustIt(s.dealerCards);
+          if (res.payout > 0) {
+            const win = (seat.sideBets.bustIt as number) * res.payout;
+            wonAmount += (seat.sideBets.bustIt as number) + win;
+            sideResults.push({ betName: 'Bust It', win: true, payout: win, message: res.msg });
+          } else {
+            sideResults.push({ betName: 'Bust It', win: false, payout: 0, message: 'No bust' });
+          }
+        }
+
+        s.bankroll += wonAmount;
         return { ...seat, hands: newHands, sideBetResults: sideResults };
       });
+
       return s;
     }
+
+    // ── Next round ────────────────────────────────────────────────────────────
     case 'NEXT_ROUND': {
-      const s = { ...state };
-      s.phase = 'BETTING';
-      (s as any).settled = false;
-      s.discard = [...s.discard, ...s.dealerCards];
+      const s = { ...state } as any;
+      s.settled = false;
       s.dealerCards = [];
       s.dealerStatus = 'playing';
       s.activeSeatIndex = -1;
-      s.seats = s.seats.map(seat => {
-         if (!seat.isActive) return seat;
-         s.discard.push(...seat.hands.flatMap(h => h.cards));
-         return {
-           ...seat,
-           hands: seat.hands.length > 0 ? [{ id: Math.random().toString(), cards: [], bet: seat.hands[0].bet, status: 'playing', isSplit: false, doubled: false }] : [],
-           activeHandIndex: 0,
-           sideBets: {},
-           sideBetResults: []
-         };
+      s.bettingSeatId = undefined;
+      s.discard = [...s.discard, ...s.dealerCards];
+
+      s.seats = s.seats.map((seat: Seat) => {
+        if (!seat.isActive) return seat;
+        s.discard.push(...seat.hands.flatMap((h: Hand) => h.cards));
+        return {
+          ...seat,
+          hands: [],
+          activeHandIndex: 0,
+          sideBets: {},
+          sideBetResults: [],
+        };
       });
-      
+
       if (s.needsShuffle) {
         s.shoe = shuffle([...s.shoe, ...s.discard]);
         s.discard = [];
         s.needsShuffle = false;
       }
+
+      s.phase = 'BETTING';
       return s;
     }
+
     case 'ADD_BANKROLL': {
       return { ...state, bankroll: state.bankroll + action.amount };
     }
+
+    default:
+      return state;
   }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function moveToNextInsurance(state: GameState): GameState {
+  let next = state.activeSeatIndex + 1;
+  while (next < state.seats.length) {
+    if (state.seats[next].isActive && state.seats[next].hands.length > 0) {
+      return { ...state, activeSeatIndex: next };
+    }
+    next++;
+  }
+  // All seats answered insurance — check if dealer has BJ
+  if (isBlackjack(state.dealerCards)) {
+    return { ...state, dealerStatus: 'blackjack', phase: 'SETTLEMENT' } as any;
+  }
+  const s = { ...state, phase: 'PLAYER_TURN' } as GameState;
+  s.activeSeatIndex = s.seats.findIndex(st => st.isActive && st.hands.length > 0);
+  if (s.activeSeatIndex === -1) s.phase = 'DEALER_TURN';
+  return checkAllDone(s);
+}
+
+function checkAllDone(state: GameState): GameState {
+  const anyPlaying = state.seats.some(
+    seat => seat.isActive && seat.hands.some(h => h.status === 'playing')
+  );
+  if (!anyPlaying) return { ...state, phase: 'DEALER_TURN' };
   return state;
 }
 
-function moveToNextInsuranceHand(state: GameState): GameState {
-  let nextIdx = state.activeSeatIndex + 1;
-  while (nextIdx < state.seats.length) {
-    if (state.seats[nextIdx].isActive && state.seats[nextIdx].hands.length > 0) {
-      return { ...state, activeSeatIndex: nextIdx };
-    }
-    nextIdx++;
-  }
-  return gameReducer(state, { type: 'END_INSURANCE' });
-}
-
-function checkSkipPlayerTurn(state: GameState): GameState {
-   let s = { ...state };
-   let allDone = true;
-   s.seats.forEach(seat => {
-     if (seat.isActive && seat.hands.length > 0) {
-       seat.hands.forEach(h => {
-         if (h.status === 'playing') allDone = false;
-       });
-     }
-   });
-   if (allDone) {
-     s.phase = 'DEALER_TURN';
-   }
-   return s;
-}
-
 function moveToNextHand(state: GameState): GameState {
-  const s = { ...state };
+  const s = { ...state, seats: [...state.seats] };
   const seat = s.seats[s.activeSeatIndex];
-  
+
+  // Try next hand in same seat
   if (seat && seat.activeHandIndex < seat.hands.length - 1) {
-    s.seats = [...s.seats];
-    s.seats[s.activeSeatIndex] = { ...seat, activeHandIndex: seat.activeHandIndex + 1 };
-    const nh = s.seats[s.activeSeatIndex].hands[s.seats[s.activeSeatIndex].activeHandIndex];
-    if (calculateHandValue(nh.cards).total >= 21) {
-       return moveToNextHand(s);
-    }
+    const newIdx = seat.activeHandIndex + 1;
+    const nextHand = seat.hands[newIdx];
+    s.seats[s.activeSeatIndex] = { ...seat, activeHandIndex: newIdx };
+
+    if (nextHand.status !== 'playing') return moveToNextHand(s);
     return s;
   }
-  
-  let nextIdx = s.activeSeatIndex + 1;
-  while (nextIdx < s.seats.length) {
-    if (s.seats[nextIdx].isActive && s.seats[nextIdx].hands.length > 0) {
-      s.activeSeatIndex = nextIdx;
-      const nh = s.seats[nextIdx].hands[0];
-      if (calculateHandValue(nh.cards).total >= 21) {
-         return moveToNextHand(s); 
-      }
+
+  // Try next active seat
+  let nextSeat = s.activeSeatIndex + 1;
+  while (nextSeat < s.seats.length) {
+    if (s.seats[nextSeat].isActive && s.seats[nextSeat].hands.length > 0) {
+      s.activeSeatIndex = nextSeat;
+      s.seats[nextSeat] = { ...s.seats[nextSeat], activeHandIndex: 0 };
+      const firstHand = s.seats[nextSeat].hands[0];
+      if (firstHand.status !== 'playing') return moveToNextHand(s);
       return s;
     }
-    nextIdx++;
+    nextSeat++;
   }
-  
+
+  // All hands done → dealer
   s.phase = 'DEALER_TURN';
   return s;
 }
