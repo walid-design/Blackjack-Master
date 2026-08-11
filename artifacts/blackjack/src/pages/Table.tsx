@@ -1,4 +1,5 @@
-import { useState, useEffect, useReducer, useRef, useMemo, CSSProperties } from 'react';
+import { useState, useEffect, useReducer, useRef, useMemo, CSSProperties, useCallback } from 'react';
+import { useAnimationControls } from 'framer-motion';
 import { useLocation, useParams } from 'wouter';
 import {
   TABLES, TableConfig, Card, Hand, Seat,
@@ -77,6 +78,10 @@ export default function Table() {
   useEffect(() => {
     localStorage.setItem('bj_bankroll', state.bankroll.toString());
   }, [state.bankroll]);
+
+  // Ref for the game-area container — used by child components to compute accurate
+  // card-deal trajectories (shoe pixel position → seat pixel position).
+  const gameAreaRef = useRef<HTMLDivElement>(null);
 
   // Lifted chip selection – needed by ControlBar (display) and SeatSpot (bet placement)
   const [selectedChip, setSelectedChip] = useState(25);
@@ -262,7 +267,7 @@ export default function Table() {
       )}
 
       {/* ── GAME AREA (felt table) ── */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#010403' }}>
+      <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#010403' }}>
 
         {/* FELT */}
         <div style={{
@@ -294,7 +299,7 @@ export default function Table() {
           </div>
 
           {/* Dealer zone */}
-          <DealerZone state={state} />
+          <DealerZone state={state} gameAreaRef={gameAreaRef} />
 
           {/* Card shoe */}
           <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
@@ -316,6 +321,7 @@ export default function Table() {
                 seatXPct={x}
                 seatYPct={y}
                 isMobile={isMobile}
+                gameAreaRef={gameAreaRef}
               />
             </div>
           ))}
@@ -354,28 +360,66 @@ export default function Table() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Flip Card — animates the dealer hole-card reveal with a scaleX squeeze-flip.
+// When faceDown changes true → false the card squeezes to zero width (edge-on),
+// swaps its face content, then expands back.  All other card state changes are
+// instant (no re-animation).
+// ─────────────────────────────────────────────────────────────────────────────
+function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
+  const controls = useAnimationControls();
+  const [showBack, setShowBack] = useState(faceDown);
+  const prevRef   = useRef(faceDown);
+
+  useEffect(() => {
+    const wasDown = prevRef.current;
+    prevRef.current = faceDown;
+    if (!faceDown && wasDown) {
+      // squeeze → swap → expand
+      (async () => {
+        await controls.start({ scaleX: 0, transition: { duration: 0.14, ease: 'easeIn' } });
+        setShowBack(false);
+        await controls.start({ scaleX: 1, transition: { duration: 0.20, ease: 'easeOut' } });
+      })();
+    } else if (faceDown) {
+      setShowBack(true);
+    }
+  }, [faceDown]);
+
+  return (
+    <motion.div animate={controls} style={{ display: 'inline-flex', transformOrigin: 'center' }}>
+      <PlayingCard card={card} faceDown={showBack} />
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Dealer Zone
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DealerZone({ state }: { state: any }) {
+function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement> }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
 
   // Delay the score/bust badge until all staggered card animations have landed.
-  // During SETTLEMENT the dealer may have drawn many extra cards; each card's
-  // entry animation has delay: i * 120ms + spring settle ~500ms.
-  // During DEALER_TURN only 2 cards are shown (hole card hidden) — show immediately.
   const [badgeReady, setBadgeReady] = useState(false);
   useEffect(() => {
     if (!revealed || dealerCards.length === 0) { setBadgeReady(false); return; }
     if (state.phase !== 'SETTLEMENT') { setBadgeReady(true); return; }
-    // Wait for the last card's stagger + spring to finish
     const delay = Math.max(350, (dealerCards.length - 1) * 120 + 500);
     const t = setTimeout(() => setBadgeReady(true), delay);
     return () => { clearTimeout(t); setBadgeReady(false); };
   }, [state.phase, dealerCards.length, revealed]);
 
   const val = badgeReady && dealerCards.length > 0 ? calculateHandValue(dealerCards) : null;
+
+  // Compute shoe → dealer offset for the entry animation.
+  // Dealer is centred at left:50% of felt.  Shoe is at right:3% of felt (≈left:97%).
+  // Felt is 106% wide relative to the game-area container.
+  // shoeX in container ≈ containerW * (0.97 * 1.06 − 0.03) ≈ containerW * 1.0
+  // dealerX in container ≈ containerW * 0.50
+  // → offset ≈ containerW * 0.50  (card starts ~50% of container width to the right)
+  const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
+  const dealerShoeOffsetX = gw * 0.50;
 
   return (
     <div style={{
@@ -388,17 +432,43 @@ function DealerZone({ state }: { state: any }) {
       </div>
       <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
         <AnimatePresence>
-          {dealerCards.map((card, i) => (
-            <motion.div
-              key={`dc-${i}`}
-              initial={{ x: 100, y: -80, opacity: 0, rotate: 12 }}
-              animate={{ x: (i - (dealerCards.length - 1) / 2) * 26, y: 0, opacity: 1, rotate: 0 }}
-              transition={{ delay: i * 0.12, type: 'spring', stiffness: 240, damping: 22 }}
-              style={{ position: 'absolute', top: 0 }}
-            >
-              <PlayingCard card={card} faceDown={i === 1 && !revealed} />
-            </motion.div>
-          ))}
+          {dealerCards.map((card, i) => {
+            // Cards beyond the initial 2 are drawn during DEALER_PLAY — stagger them.
+            const extraDelay = i >= 2 ? (i - 2) * 0.14 : 0;
+            return (
+              <motion.div
+                key={`dc-${i}`}
+                initial={{
+                  // Start at the shoe (right side, same height as dealer)
+                  x: dealerShoeOffsetX,
+                  y: -6,
+                  opacity: 0,
+                  rotate: 14,
+                  scale: 0.88,
+                }}
+                animate={{
+                  x: (i - (dealerCards.length - 1) / 2) * 26,
+                  y: 0,
+                  opacity: 1,
+                  rotate: 0,
+                  scale: 1,
+                }}
+                transition={{
+                  delay: extraDelay,
+                  duration: 0.40,
+                  ease: [0.22, 0, 0.18, 1],  // fast start, smooth deceleration into landing
+                  opacity: { duration: 0.12, delay: extraDelay },
+                }}
+                style={{ position: 'absolute', top: 0 }}
+              >
+                {/* Hole card (index 1) uses FlipCard so it reveals with a squeeze animation */}
+                {i === 1
+                  ? <FlipCard card={card} faceDown={!revealed} />
+                  : <PlayingCard card={card} />
+                }
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
       {val && (
@@ -481,23 +551,44 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
 // content exists above (cards) or below (action buttons / side bets).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Approximate card deal origin relative to a seat (for animation trajectory). */
-function cardDealOrigin(seatXPct: number): { x: number; y: number } {
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
-  // Shoe is at right:4% of felt; felt = 106% vw → shoe is at ~96% of felt from left
-  // Simplified: shoe ≈ 97% of vw
-  const shoeX = vw * 0.97;
-  const seatX  = vw * (seatXPct / 100);
-  return {
-    x: shoeX - seatX, // always positive (shoe is to the right of every seat)
-    y: -320,           // shoe is always above — fixed approximation
-  };
+/**
+ * Compute the card's initial position offset (shoe → seat) for the deal animation.
+ * All values are in pixels, relative to the seat's arc anchor point.
+ *
+ * Coordinate maths:
+ *   Felt is positioned left:−3%, right:−3% of the game-area container → 106% wide.
+ *   Shoe is at right:3% of felt ≈ left:97% of felt.
+ *   shoeX_in_container  ≈ (0.97 × 1.06 − 0.03) × gw  ≈  gw × 1.0
+ *   seatX_in_container  = (seatXPct/100 × 1.06 − 0.03) × gw
+ *   → offset.x = shoeX − seatX   (always positive; leftmost seats travel furthest)
+ *
+ *   Felt is bottom:1% of game-area → height ≈ gh × 0.99.
+ *   Shoe is at top:3.5% of felt  → shoeY ≈ gh × 0.035.
+ *   seatY_in_container = seatYPct/100 × gh × 0.99
+ *   → offset.y = shoeY − seatY   (always negative; shoe is above every seat)
+ */
+function cardDealOrigin(
+  seatXPct: number,
+  seatYPct: number,
+  gameAreaRef: React.RefObject<HTMLDivElement>,
+): { x: number; y: number } {
+  const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
+  const gh = gameAreaRef.current?.offsetHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 720);
+
+  const shoeX = gw * 1.00;                          // shoe centre ≈ right edge of container
+  const shoeY = gh * 0.035;                          // shoe top:3.5% of felt
+
+  const seatX = (seatXPct / 100 * 1.06 - 0.03) * gw;
+  const seatY = (seatYPct / 100 * 0.99)         * gh;
+
+  return { x: shoeX - seatX, y: shoeY - seatY };
 }
 
-function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, isMobile = false }: {
+function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
-  seatXPct: number; seatYPct: number; isMobile?: boolean;
+  seatXPct: number; seatYPct?: number; isMobile?: boolean;
+  gameAreaRef: React.RefObject<HTMLDivElement>;
 }) {
   // Circle radius scales down on mobile — extra step for 7-seat tables
   const R = isMobile
@@ -529,7 +620,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
   // Late surrender: first 2 cards only, not after a split
   const canSurrender = !!activeHand && activeHand.cards.length === 2 && !activeHand.isSplit;
 
-  const origin = cardDealOrigin(seatXPct);
+  const origin = cardDealOrigin(seatXPct, seatYPct, gameAreaRef);
 
   // ── EMPTY SEAT ───────────────────────────────────────────────────────────
   if (!seat.isActive) {
@@ -662,21 +753,41 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 
               {/* Card fan */}
               <div style={{ position: 'relative', width: handW, height: handH }}>
-                {hand.cards.map((card: Card, cIdx: number) => (
-                  <motion.div
-                    key={cIdx}
-                    // Cards fly in FROM the shoe position (upper-right) to their
-                    // stacked rest position. Leftmost seats have a larger x offset
-                    // (shoe is further right relative to them) — this makes the
-                    // right-to-left dealing order visually obvious.
-                    initial={{ x: origin.x - cIdx * 17, y: origin.y, opacity: 0, rotate: -12 }}
-                    animate={{ x: cIdx * 17, y: 0, opacity: 1, rotate: 0 }}
-                    transition={{ type: 'tween', duration: 0.38, ease: 'easeOut' }}
-                    style={{ position: 'absolute', top: 0 }}
-                  >
-                    <PlayingCard card={card} />
-                  </motion.div>
-                ))}
+                {hand.cards.map((card: Card, cIdx: number) => {
+                  // Each card starts at the shoe (upper-right) and arcs down to its
+                  // fan position.  We separate x/y easing so the trajectory feels
+                  // like a real throw: x decelerates smoothly, y accelerates like
+                  // gravity pulling the card onto the felt.
+                  const ix = origin.x - cIdx * 17;  // start x relative to card's final x
+                  const iy = origin.y;               // start y (negative = above seat)
+                  // Arc apex: card rises slightly above the shoe on the way out,
+                  // then curves down.  We fake the arc by using keyframes for y.
+                  const arcApex = iy * 1.12;        // 12% above the shoe height
+                  return (
+                    <motion.div
+                      key={`${hand.id}-${cIdx}`}
+                      initial={{ x: ix, y: iy, opacity: 0, rotate: -20, scale: 0.82 }}
+                      animate={{
+                        x: cIdx * 17,
+                        y: [iy, arcApex, 0],   // arc: shoe → apex → seat
+                        opacity: [0, 1, 1],
+                        rotate: 0,
+                        scale: 1,
+                      }}
+                      transition={{
+                        duration: 0.46,
+                        x:       { ease: [0.20, 0, 0.15, 1] },  // smooth deceleration
+                        y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
+                        opacity: { duration: 0.10 },
+                        rotate:  { ease: 'easeOut', duration: 0.46 },
+                        scale:   { ease: 'easeOut', duration: 0.46 },
+                      }}
+                      style={{ position: 'absolute', top: 0 }}
+                    >
+                      <PlayingCard card={card} />
+                    </motion.div>
+                  );
+                })}
               </div>
 
               {/* Hand value badge */}
