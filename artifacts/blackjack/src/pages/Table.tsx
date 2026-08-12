@@ -234,20 +234,22 @@ export default function Table() {
         </div>
       </header>
 
-      {/* ── DEALER HISTORY STRIP ── */}
-      {dealerHistory.length > 0 && (
-        <div style={{
-          height: 28, flexShrink: 0,
-          background: 'rgba(12,15,30,0.80)',
-          borderBottom: '1px solid rgba(240,184,48,0.08)',
-          display: 'flex', alignItems: 'center',
-          padding: '0 12px', gap: 6,
-          zIndex: 29,
-        }}>
-          <div style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', fontFamily: 'sans-serif', marginRight: 4, whiteSpace: 'nowrap' }}>
-            Dealer History
-          </div>
-          {dealerHistory.map((h, i) => (
+      {/* ── DEALER HISTORY STRIP ── always rendered so it never causes a layout shift */}
+      <div style={{
+        height: 28, flexShrink: 0,
+        background: 'rgba(12,15,30,0.80)',
+        borderBottom: '1px solid rgba(240,184,48,0.08)',
+        display: 'flex', alignItems: 'center',
+        padding: '0 12px', gap: 6,
+        zIndex: 29,
+        overflow: 'hidden',
+      }}>
+        <div style={{ fontSize: 8, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', fontFamily: 'sans-serif', marginRight: 4, whiteSpace: 'nowrap' }}>
+          Dealer History
+        </div>
+        {dealerHistory.length === 0
+          ? <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.12)', fontFamily: 'sans-serif', fontStyle: 'italic' }}>—</div>
+          : dealerHistory.map((h, i) => (
             <div key={i} style={{
               width: 28, height: 18,
               borderRadius: 4,
@@ -263,9 +265,9 @@ export default function Table() {
             }}>
               {h.bj ? 'BJ' : h.bust ? 'B' : h.total}
             </div>
-          ))}
-        </div>
-      )}
+          ))
+        }
+      </div>
 
       {/* ── GAME AREA (felt table) ── */}
       <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#0d1020' }}>
@@ -1015,9 +1017,9 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
               : seatXPct > 67
               ? { left:  R,     transform: 'translateX(-100%)' }    // rightmost: pin right edge
               : { left: '0px',  transform: 'translateX(-50%)' }),   // center seats: centre
-            display: 'flex', flexWrap: 'wrap', gap: isSelectedBet ? 6 : 4,
+            display: 'flex', flexWrap: 'wrap', gap: 5,
             justifyContent: 'center',
-            width: isSelectedBet ? 220 : 170,
+            width: 190,
             zIndex: 25,
           }}
         >
