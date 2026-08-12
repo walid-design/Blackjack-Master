@@ -153,7 +153,7 @@ export default function Table() {
   // Dealer plays after 1.4s pause
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
-    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 1400);
+    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 2000);
     return () => clearTimeout(t);
   }, [state.phase]);
 
@@ -171,8 +171,8 @@ export default function Table() {
     if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
       const cardCount: number = (state.dealerCards || []).length;
       // last card stagger: (cardCount-1)*120ms + spring settle ~650ms
-      // Last extra dealer card lands at (cardCount-1)*450ms; add 700ms for animation settle.
-      const delay = Math.max(800, (cardCount - 1) * 450 + 700);
+      // Last extra dealer card lands at (cardCount-1)*700ms; add 800ms for animation settle.
+      const delay = Math.max(1000, (cardCount - 1) * 700 + 800);
       const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
       return () => clearTimeout(t);
     }
@@ -371,10 +371,10 @@ export default function Table() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Flip Card — animates the dealer hole-card reveal with a scaleX squeeze-flip.
-// When faceDown changes true → false the card squeezes to zero width (edge-on),
-// swaps its face content, then expands back.  All other card state changes are
-// instant (no re-animation).
+// Flip Card — animates the dealer hole-card reveal with a proper rotateY 3-D flip.
+// When faceDown changes true → false the card rotates 90° away (edge-on), swaps its
+// face content, then rotates the remaining 90° back.  A perspective wrapper gives the
+// depth illusion.  All other card state changes are instant (no re-animation).
 // ─────────────────────────────────────────────────────────────────────────────
 function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
   const controls = useAnimationControls();
@@ -385,21 +385,26 @@ function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
     const wasDown = prevRef.current;
     prevRef.current = faceDown;
     if (!faceDown && wasDown) {
-      // squeeze → swap → expand
+      // Rotate away (0 → -90°), swap face, then rotate back (-90° → 0) from the front
       (async () => {
-        await controls.start({ scaleX: 0, transition: { duration: 0.14, ease: 'easeIn' } });
+        await controls.start({ rotateY: -90, transition: { duration: 0.22, ease: 'easeIn' } });
         setShowBack(false);
-        await controls.start({ scaleX: 1, transition: { duration: 0.20, ease: 'easeOut' } });
+        controls.set({ rotateY: 90 });
+        await controls.start({ rotateY: 0, transition: { duration: 0.28, ease: 'easeOut' } });
       })();
     } else if (faceDown) {
       setShowBack(true);
+      controls.set({ rotateY: 0 });
     }
   }, [faceDown]);
 
   return (
-    <motion.div animate={controls} style={{ display: 'inline-flex', transformOrigin: 'center' }}>
-      <PlayingCard card={card} faceDown={showBack} />
-    </motion.div>
+    // Perspective wrapper is needed on the PARENT for the 3-D depth effect
+    <div style={{ perspective: 500, display: 'inline-flex' }}>
+      <motion.div animate={controls} style={{ transformOrigin: 'center', display: 'inline-flex' }}>
+        <PlayingCard card={card} faceDown={showBack} />
+      </motion.div>
+    </div>
   );
 }
 
@@ -428,7 +433,7 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
     // Phase just became SETTLEMENT (DEALER_PLAY fired, possibly adding extra cards).
     // Hide badge instantly, then reveal after all stagger animations have settled.
     setBadgeReady(false);
-    const delay = Math.max(400, (dealerCards.length - 1) * 450 + 500);
+    const delay = Math.max(600, (dealerCards.length - 1) * 700 + 600);
     const t = setTimeout(() => setBadgeReady(true), delay);
     return () => { clearTimeout(t); setBadgeReady(false); };
   }, [state.phase, dealerCards.length, revealed]);
@@ -457,8 +462,8 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
         <AnimatePresence>
           {dealerCards.map((card, i) => {
             // Cards beyond the initial 2 are drawn during DEALER_PLAY — stagger so each
-            // card visibly lands before the next one leaves the shoe (450ms per card).
-            const extraDelay = i >= 2 ? (i - 1) * 0.45 : 0;
+            // card visibly lands before the next one leaves the shoe (700ms per card).
+            const extraDelay = i >= 2 ? (i - 1) * 0.70 : 0;
             return (
               <motion.div
                 key={`dc-${i}`}
@@ -479,9 +484,9 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
                 }}
                 transition={{
                   delay: extraDelay,
-                  duration: 0.40,
+                  duration: 0.55,
                   ease: [0.22, 0, 0.18, 1],  // fast start, smooth deceleration into landing
-                  opacity: { duration: 0.12, delay: extraDelay },
+                  opacity: { duration: 0.18, delay: extraDelay },
                 }}
                 style={{ position: 'absolute', top: 0 }}
               >
