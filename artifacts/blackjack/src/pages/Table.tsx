@@ -153,7 +153,7 @@ export default function Table() {
   // Dealer plays after 1.4s pause
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
-    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 2000);
+    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 3000);
     return () => clearTimeout(t);
   }, [state.phase]);
 
@@ -171,8 +171,9 @@ export default function Table() {
     if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
       const cardCount: number = (state.dealerCards || []).length;
       // last card stagger: (cardCount-1)*120ms + spring settle ~650ms
-      // Last extra dealer card lands at (cardCount-1)*700ms; add 800ms for animation settle.
-      const delay = Math.max(1000, (cardCount - 1) * 700 + 800);
+      // Last extra dealer card (index cardCount-1) has stagger (cardCount-2)*900ms
+      // plus 550ms slide + 900ms buffer before revealing results.
+      const delay = Math.max(1200, (cardCount - 2) * 900 + 1450);
       const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
       return () => clearTimeout(t);
     }
@@ -433,7 +434,7 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
     // Phase just became SETTLEMENT (DEALER_PLAY fired, possibly adding extra cards).
     // Hide badge instantly, then reveal after all stagger animations have settled.
     setBadgeReady(false);
-    const delay = Math.max(600, (dealerCards.length - 1) * 700 + 600);
+    const delay = Math.max(800, (dealerCards.length - 2) * 900 + 1200);
     const t = setTimeout(() => setBadgeReady(true), delay);
     return () => { clearTimeout(t); setBadgeReady(false); };
   }, [state.phase, dealerCards.length, revealed]);
@@ -461,9 +462,9 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
       <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
         <AnimatePresence>
           {dealerCards.map((card, i) => {
-            // Cards beyond the initial 2 are drawn during DEALER_PLAY — stagger so each
-            // card visibly lands before the next one leaves the shoe (700ms per card).
-            const extraDelay = i >= 2 ? (i - 1) * 0.70 : 0;
+            // Stagger ALL dealer cards so they appear to be dealt one at a time.
+            // Initial 2 cards: 0 ms and 400 ms.  Extra cards (DEALER_PLAY): 900 ms apart.
+            const extraDelay = i < 2 ? i * 0.40 : (i - 1) * 0.90;
             return (
               <motion.div
                 key={`dc-${i}`}
@@ -671,6 +672,46 @@ function BonusPaidToast({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PlayerCardAnim — isolated wrapper so origin values are captured ONCE at mount
+// via useRef and never change on re-renders.  Without this, any parent re-render
+// (e.g. when DEALER_PLAY fires and dealerCards grows) would recompute origin,
+// change the `animate` keyframes, and cause Framer Motion to restart the arc
+// animation → cards flash back to the shoe position.
+// ─────────────────────────────────────────────────────────────────────────────
+function PlayerCardAnim({
+  card, cIdx, origin,
+}: { card: Card; cIdx: number; origin: { x: number; y: number } }) {
+  // Freeze origin at mount time — never update.
+  const ix       = useRef(origin.x - cIdx * 17).current;
+  const iy       = useRef(origin.y).current;
+  const arcApex  = iy * 1.12;   // 12% higher than the shoe height for the arc
+
+  return (
+    <motion.div
+      initial={{ x: ix, y: iy, opacity: 0, rotate: -20, scale: 0.82 }}
+      animate={{
+        x: cIdx * 17,
+        y: [iy, arcApex, 0],
+        opacity: [0, 1, 1],
+        rotate: 0,
+        scale: 1,
+      }}
+      transition={{
+        duration: 0.46,
+        x:       { ease: [0.20, 0, 0.15, 1] },
+        y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
+        opacity: { duration: 0.10 },
+        rotate:  { ease: 'easeOut', duration: 0.46 },
+        scale:   { ease: 'easeOut', duration: 0.46 },
+      }}
+      style={{ position: 'absolute', top: 0 }}
+    >
+      <PlayingCard card={card} />
+    </motion.div>
+  );
+}
+
 function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
@@ -850,43 +891,16 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                 })()}
               </AnimatePresence>
 
-              {/* Card fan */}
+              {/* Card fan — each card uses PlayerCardAnim which freezes origin at mount */}
               <div style={{ position: 'relative', width: handW, height: handH }}>
-                {hand.cards.map((card: Card, cIdx: number) => {
-                  // Each card starts at the shoe (upper-right) and arcs down to its
-                  // fan position.  We separate x/y easing so the trajectory feels
-                  // like a real throw: x decelerates smoothly, y accelerates like
-                  // gravity pulling the card onto the felt.
-                  const ix = origin.x - cIdx * 17;  // start x relative to card's final x
-                  const iy = origin.y;               // start y (negative = above seat)
-                  // Arc apex: card rises slightly above the shoe on the way out,
-                  // then curves down.  We fake the arc by using keyframes for y.
-                  const arcApex = iy * 1.12;        // 12% above the shoe height
-                  return (
-                    <motion.div
-                      key={`${hand.id}-${cIdx}`}
-                      initial={{ x: ix, y: iy, opacity: 0, rotate: -20, scale: 0.82 }}
-                      animate={{
-                        x: cIdx * 17,
-                        y: [iy, arcApex, 0],   // arc: shoe → apex → seat
-                        opacity: [0, 1, 1],
-                        rotate: 0,
-                        scale: 1,
-                      }}
-                      transition={{
-                        duration: 0.46,
-                        x:       { ease: [0.20, 0, 0.15, 1] },  // smooth deceleration
-                        y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
-                        opacity: { duration: 0.10 },
-                        rotate:  { ease: 'easeOut', duration: 0.46 },
-                        scale:   { ease: 'easeOut', duration: 0.46 },
-                      }}
-                      style={{ position: 'absolute', top: 0 }}
-                    >
-                      <PlayingCard card={card} />
-                    </motion.div>
-                  );
-                })}
+                {hand.cards.map((card: Card, cIdx: number) => (
+                  <PlayerCardAnim
+                    key={`${hand.id}-${cIdx}`}
+                    card={card}
+                    cIdx={cIdx}
+                    origin={origin}
+                  />
+                ))}
               </div>
 
               {/* Hand value badge */}
