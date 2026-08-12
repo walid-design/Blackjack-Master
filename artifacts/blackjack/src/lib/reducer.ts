@@ -103,10 +103,53 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
     }
 
     // ── Dealing ──────────────────────────────────────────────────────────────
+    case 'REPEAT_BET': {
+      if (!state.lastBets) return state;
+      const rb = state.lastBets;
+      // Calculate total cost
+      let cost = 0;
+      state.seats.forEach((seat, i) => {
+        if (!seat.isActive) return;
+        cost += rb.main[i] ?? 0;
+        cost += Object.values(rb.side[i] ?? {}).reduce((a: number, b) => a + (b as number), 0);
+      });
+      if (state.bankroll < cost) return state;
+      const s = { ...state, seats: [...state.seats], bankroll: state.bankroll - cost };
+      s.seats = s.seats.map((seat, i) => {
+        if (!seat.isActive) return seat;
+        const mainBet = rb.main[i] ?? 0;
+        const sideBets = { ...(rb.side[i] ?? {}) } as any;
+        if (mainBet === 0) return seat;
+        return {
+          ...seat,
+          sideBets,
+          hands: [{
+            id: Math.random().toString(36),
+            cards: [],
+            bet: mainBet,
+            status: 'playing' as const,
+            isSplit: false,
+            doubled: false,
+          }],
+        };
+      });
+      return s;
+    }
+
     case 'DEAL': {
+      // Snapshot bets for Repeat Bet before dealing
+      const lastBets: GameState['lastBets'] = { main: {}, side: {} };
+      state.seats.forEach((seat, i) => {
+        if (seat.isActive && (seat.hands[0]?.bet ?? 0) > 0) {
+          lastBets!.main[i] = seat.hands[0].bet;
+          lastBets!.side[i] = { ...(seat.sideBets as any) };
+        }
+      });
+
       // Reset dealer, keep seat bets, transition to DEALING
       return {
         ...state,
+        lastBets,
         phase: 'DEALING',
         dealerCards: [],
         dealerStatus: 'playing',

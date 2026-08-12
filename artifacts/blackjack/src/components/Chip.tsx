@@ -111,49 +111,72 @@ export function ChipStack({ amount }: { amount: number }) {
 }
 
 // ─── Side-bet chip button ─────────────────────────────────────────────────────
-// Circular chip-style button for placing side bets on the felt
+// Circular chip-style button for placing side bets on the felt.
+// Uses short rim tick marks (not full-width crossing lines) so the label stays readable.
 export function SideBetChip({
   label, amount, onClick,
 }: { label: string; amount: number; onClick: () => void }) {
   const placed = amount > 0;
+  const rimColor = placed ? 'rgba(240,184,48,0.55)' : 'rgba(255,255,255,0.18)';
+
   return (
     <motion.button
       onClick={onClick}
-      whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.92 }}
+      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.93 }}
       animate={placed ? { y: -4 } : { y: 0 }}
       style={{
-        width: 48, height: 48, borderRadius: '50%', position: 'relative',
-        border: `3px solid ${placed ? '#d4a820' : 'rgba(255,255,255,0.22)'}`,
-        background: placed ? 'rgba(212,168,32,0.18)' : 'rgba(0,0,0,0.45)',
+        width: 52, height: 52, borderRadius: '50%', position: 'relative',
+        border: `3px solid ${placed ? '#f0b830' : 'rgba(255,255,255,0.25)'}`,
+        background: placed
+          ? 'radial-gradient(circle, rgba(240,184,48,0.22) 0%, rgba(240,184,48,0.08) 100%)'
+          : 'radial-gradient(circle, rgba(30,34,60,0.95) 0%, rgba(18,22,44,0.98) 100%)',
         cursor: 'pointer', outline: 'none', padding: 0,
         boxShadow: placed
-          ? '0 0 0 2px rgba(212,168,32,0.4), 0 4px 14px rgba(212,168,32,0.3)'
-          : '0 2px 6px rgba(0,0,0,0.5)',
+          ? '0 0 0 2px rgba(240,184,48,0.3), 0 4px 16px rgba(240,184,48,0.25)'
+          : '0 2px 8px rgba(0,0,0,0.55)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: 1,
-        transition: 'border-color 0.15s, background 0.15s',
+        gap: 2,
+        transition: 'border-color 0.15s, background 0.15s, box-shadow 0.15s',
+        overflow: 'hidden',
       }}
     >
-      {/* Rim stripes */}
-      {[0, 60, 120].map(angle => (
+      {/* Short rim tick marks — pushed to edge, never cross center */}
+      {[0, 45, 90, 135, 180, 225, 270, 315].map(angle => (
         <div key={angle} style={{
-          position: 'absolute', width: '100%', height: 2.5,
-          background: placed ? 'rgba(212,168,32,0.4)' : 'rgba(255,255,255,0.12)',
-          top: '50%', left: 0, marginTop: -1.25,
-          transform: `rotate(${angle}deg)`,
+          position: 'absolute',
+          width: 5, height: 2,
+          background: rimColor,
+          borderRadius: 1,
+          top: '50%', left: '50%',
+          marginTop: -1, marginLeft: -2.5,
+          transformOrigin: 'center center',
+          transform: `rotate(${angle}deg) translateX(20px)`,
         }} />
       ))}
-      <span style={{
-        position: 'relative', zIndex: 1,
-        fontSize: 7.5, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase',
-        color: placed ? '#d4a820' : 'rgba(255,255,255,0.55)',
-        fontFamily: 'sans-serif', lineHeight: 1.1, textAlign: 'center',
-        maxWidth: 38,
-      }}>{label}</span>
+
+      {/* Label — dark pill bg for contrast over any background */}
+      <div style={{
+        position: 'relative', zIndex: 2,
+        background: 'rgba(0,0,0,0.52)',
+        borderRadius: 4,
+        padding: '2px 4px',
+        maxWidth: 44,
+        textAlign: 'center',
+      }}>
+        <span style={{
+          fontSize: 8, fontWeight: 800, letterSpacing: '0.03em', textTransform: 'uppercase',
+          color: placed ? '#f5cc50' : 'rgba(220,225,240,0.8)',
+          fontFamily: 'Inter, sans-serif', lineHeight: 1.1,
+          display: 'block',
+        }}>{label}</span>
+      </div>
+
+      {/* Amount badge when placed */}
       {placed && (
         <span style={{
-          position: 'relative', zIndex: 1,
-          fontSize: 8, fontWeight: 700, color: '#d4a820', fontFamily: 'sans-serif',
+          position: 'relative', zIndex: 2,
+          fontSize: 8, fontWeight: 700, color: '#f0b830',
+          fontFamily: 'Inter, sans-serif', lineHeight: 1,
         }}>${amount}</span>
       )}
     </motion.button>

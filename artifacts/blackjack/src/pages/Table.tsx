@@ -1028,7 +1028,12 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
             transition={{ type: 'spring', stiffness: 340, damping: 28 }}
             style={{
               position: 'absolute', top: R + 8,
-              left: '50%', transform: 'translateX(-50%)',
+              // Smart anchor — mirrors side-bet panel so right-edge seats never overflow
+              ...(seatXPct < 33
+                ? { left: -R,    transform: 'translateX(0)' }
+                : seatXPct > 67
+                ? { left:  R,    transform: 'translateX(-100%)' }
+                : { left: '0px', transform: 'translateX(-50%)' }),
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
             }}
           >
@@ -1079,8 +1084,8 @@ function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
       transition={{ type: 'spring', stiffness: 420, damping: 36 }}
       style={{
         flexShrink: 0,
-        background: 'rgba(2,8,4,0.97)',
-        borderTop: '1px solid rgba(212,168,32,0.22)',
+        background: 'rgba(15,18,36,0.98)',
+        borderTop: '1px solid rgba(240,184,48,0.18)',
         padding: '8px 12px 10px',
         display: 'flex', flexDirection: 'column', gap: 7,
         zIndex: 36,
@@ -1179,8 +1184,8 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
           transition={{ type: 'spring', stiffness: 400, damping: 38 }}
           style={{
             flexShrink: 0, overflow: 'hidden',
-            background: 'rgba(2,10,5,0.97)',
-            borderTop: '1px solid rgba(212,168,32,0.18)',
+            background: 'rgba(15,18,36,0.98)',
+            borderTop: '1px solid rgba(240,184,48,0.14)',
             zIndex: 35,
           }}
         >
@@ -1317,9 +1322,18 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
           {/* Status / next-round */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             {state.phase === 'BETTING' && (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={{ ...ghostBtn, padding: '6px 12px', fontSize: 10 }}>Clear</button>
-                {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}>Deal</button>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
+                {state.lastBets && Object.keys(state.lastBets.main).length > 0 && (
+                  <button
+                    data-testid="button-repeat-bet"
+                    onClick={() => dispatch({ type: 'REPEAT_BET' })}
+                    style={{ ...ghostBtn, padding: '5px 10px', fontSize: 9, color: 'rgba(240,184,48,0.75)', borderColor: 'rgba(240,184,48,0.28)' }}
+                  >↻ Repeat Bet</button>
+                )}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={{ ...ghostBtn, padding: '6px 12px', fontSize: 10 }}>Clear</button>
+                  {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}>Deal</button>}
+                </div>
               </div>
             )}
             {state.phase === 'SETTLEMENT' && (state as any).settled && (
@@ -1407,9 +1421,18 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
           </div>
         )}
         {state.phase === 'BETTING' && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={ghostBtn}>Clear Bets</button>
-            {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={goldBtn}>Deal</button>}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            {state.lastBets && Object.keys(state.lastBets.main).length > 0 && (
+              <button
+                data-testid="button-repeat-bet"
+                onClick={() => dispatch({ type: 'REPEAT_BET' })}
+                style={{ ...ghostBtn, fontSize: 10, color: 'rgba(240,184,48,0.8)', borderColor: 'rgba(240,184,48,0.3)', padding: '5px 18px' }}
+              >↻ Repeat Last Bet</button>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={ghostBtn}>Clear Bets</button>
+              {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={goldBtn}>Deal</button>}
+            </div>
           </div>
         )}
         {state.phase === 'SETTLEMENT' && (state as any).settled && (

@@ -14,6 +14,11 @@ export interface GameState {
   bettingSeatId?: number;
   /** Set during SPLIT_DEALING — which hand index within activeSeatIndex gets the next card */
   splitCardTarget?: number;
+  /** Snapshot of bets placed at DEAL time — used for Repeat Bet */
+  lastBets?: {
+    main: Record<number, number>;
+    side: Record<number, Record<string, number>>;
+  };
 }
 
 export type GameAction =
@@ -42,4 +47,5 @@ export type GameAction =
   | { type: 'PERFORM_SETTLEMENT' }
   | { type: 'SETTLEMENT' }
   | { type: 'NEXT_ROUND' }
-  | { type: 'ADD_BANKROLL'; amount: number };
+  | { type: 'ADD_BANKROLL'; amount: number }
+  | { type: 'REPEAT_BET' };
