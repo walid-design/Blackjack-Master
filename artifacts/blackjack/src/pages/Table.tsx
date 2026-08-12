@@ -190,8 +190,8 @@ export default function Table() {
         height: 46, flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 16px',
-        background: 'rgba(1,4,2,0.98)',
-        borderBottom: '1px solid rgba(150,110,30,0.18)',
+        background: 'rgba(6,6,16,0.98)',
+        borderBottom: '1px solid rgba(240,184,48,0.12)',
         zIndex: 30,
       }}>
         <button
@@ -209,7 +209,7 @@ export default function Table() {
         </button>
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.22em', color: '#d4a820' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.22em', color: '#f0b830' }}>
             {tableConfig.name.toUpperCase()}
           </div>
           <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.28)', fontFamily: 'sans-serif', marginTop: 1 }}>
@@ -224,7 +224,7 @@ export default function Table() {
             <motion.div
               animate={{ width: `${Math.max(4, shoePct)}%` }}
               transition={{ duration: 0.5 }}
-              style={{ height: '100%', background: shoePct < 25 ? '#e04040' : '#d4a820', borderRadius: 3 }}
+              style={{ height: '100%', background: shoePct < 25 ? '#e04040' : '#f0b830', borderRadius: 3 }}
             />
           </div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: 'sans-serif', minWidth: 32 }}>
@@ -238,7 +238,7 @@ export default function Table() {
         <div style={{
           height: 28, flexShrink: 0,
           background: 'rgba(0,0,0,0.55)',
-          borderBottom: '1px solid rgba(150,110,30,0.1)',
+          borderBottom: '1px solid rgba(240,184,48,0.08)',
           display: 'flex', alignItems: 'center',
           padding: '0 12px', gap: 6,
           zIndex: 29,
@@ -258,7 +258,7 @@ export default function Table() {
                 ? 'rgba(180,30,30,0.35)'
                 : 'rgba(255,255,255,0.08)',
               border: `1px solid ${h.bj ? 'rgba(212,168,32,0.5)' : h.bust ? 'rgba(220,50,50,0.4)' : 'rgba(255,255,255,0.1)'}`,
-              color: h.bj ? '#d4a820' : h.bust ? '#e05050' : 'rgba(255,255,255,0.6)',
+              color: h.bj ? '#f0b830' : h.bust ? '#e05050' : 'rgba(255,255,255,0.6)',
             }}>
               {h.bj ? 'BJ' : h.bust ? 'B' : h.total}
             </div>
@@ -797,7 +797,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                   border: `1px solid ${isThisHand ? 'rgba(212,168,32,0.75)' : 'rgba(255,255,255,0.13)'}`,
                   borderRadius: 12, padding: '2px 8px',
                   fontSize: 11, fontWeight: 700, fontFamily: 'sans-serif',
-                  color: val.total > 21 ? '#e05050' : val.total === 21 ? '#d4a820' : 'rgba(255,255,255,0.82)',
+                  color: val.total > 21 ? '#e05050' : val.total === 21 ? '#f0b830' : 'rgba(255,255,255,0.82)',
                 }}>
                   {val.total}{val.soft && val.total < 21 ? `/${val.total - 10}` : ''}{val.total > 21 ? ' bust' : ''}
                 </div>
@@ -923,11 +923,11 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           borderRadius: 8, padding: '10px 14px', textAlign: 'center',
           zIndex: 50, minWidth: 140, boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
         }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#d4a820', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
+          <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#f0b830', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max ${Math.floor(currentBet / 2)}</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={() => dispatch({ type: 'INSURANCE' })}
-              style={{ flex: 1, padding: '4px 0', background: '#d4a820', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>Buy</button>
+              style={{ flex: 1, padding: '4px 0', background: '#f0b830', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>Buy</button>
             <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })}
               style={{ flex: 1, padding: '4px 0', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', fontWeight: 700, fontSize: 10, borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', fontFamily: 'sans-serif' }}>Skip</button>
           </div>
@@ -969,7 +969,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         )}
         {isPlayerTurn && (
           <motion.div animate={{ scale: [1, 1.4, 1] }} transition={{ repeat: Infinity, duration: 1.4 }}
-            style={{ position: 'absolute', bottom: -11, width: 7, height: 7, borderRadius: '50%', background: '#d4a820' }} />
+            style={{ position: 'absolute', bottom: -11, width: 7, height: 7, borderRadius: '50%', background: '#f0b830' }} />
         )}
       </motion.div>
 
@@ -1098,7 +1098,7 @@ function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
             style={{
               flex: 1, height: 50,
               background: primary
-                ? 'linear-gradient(135deg,#c49a10,#e6c038)'
+                ? 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)'
                 : 'rgba(255,255,255,0.1)',
               border: primary ? 'none' : '1px solid rgba(255,255,255,0.22)',
               borderRadius: 7,
@@ -1210,12 +1210,12 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
                   >
                     <span style={{
                       fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-                      color: active ? '#d4a820' : 'rgba(255,255,255,0.38)',
+                      color: active ? '#f0b830' : 'rgba(255,255,255,0.38)',
                       fontFamily: 'sans-serif', textTransform: 'uppercase',
                     }}>Seat {idx + 1}</span>
                     {total > 0 && (
                       <span style={{
-                        fontSize: 8, fontWeight: 700, color: active ? '#d4a820' : 'rgba(212,168,32,0.5)',
+                        fontSize: 8, fontWeight: 700, color: active ? '#f0b830' : 'rgba(212,168,32,0.5)',
                         fontFamily: 'sans-serif',
                       }}>${total}</span>
                     )}
@@ -1264,7 +1264,7 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
                     }}
                   />
                   {placed > 0 && (
-                    <div style={{ fontSize: 8, fontWeight: 700, color: '#d4a820', fontFamily: 'sans-serif' }}>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: '#f0b830', fontFamily: 'sans-serif' }}>
                       ${placed}
                     </div>
                   )}
@@ -1298,8 +1298,8 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
     return (
       <div style={{
         flexShrink: 0,
-        background: 'rgba(1,4,2,0.98)',
-        borderTop: '1px solid rgba(140,100,25,0.16)',
+        background: 'rgba(6,6,16,0.98)',
+        borderTop: '1px solid rgba(240,184,48,0.12)',
         padding: '8px 12px 10px',
         display: 'flex', flexDirection: 'column', gap: 8,
         zIndex: 30,
@@ -1367,8 +1367,8 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
   return (
     <div style={{
       height: 118, flexShrink: 0,
-      background: 'rgba(1,4,2,0.98)',
-      borderTop: '1px solid rgba(140,100,25,0.16)',
+      background: 'rgba(6,6,16,0.98)',
+      borderTop: '1px solid rgba(240,184,48,0.12)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 16px', gap: 10, zIndex: 30,
     }}>
@@ -1447,7 +1447,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
 const goldBtn: CSSProperties = {
   padding: '7px 26px', fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase',
   fontWeight: 700, fontFamily: 'sans-serif',
-  background: 'linear-gradient(135deg,#c49a10,#e6c038)',
+  background: 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)',
   border: 'none', borderRadius: 4, color: '#000', cursor: 'pointer',
   boxShadow: '0 2px 12px rgba(212,168,32,0.3)',
 };
@@ -1474,7 +1474,7 @@ function feltActionBtn(disabled: boolean, primary: boolean): CSSProperties {
       ? '1px solid rgba(212,168,32,0.5)'
       : '1px solid rgba(255,255,255,0.22)',
     borderRadius: 4,
-    color: disabled ? 'rgba(255,255,255,0.18)' : primary ? '#d4a820' : '#f0e6c8',
+    color: disabled ? 'rgba(255,255,255,0.18)' : primary ? '#f0b830' : '#f0e6c8',
     cursor: disabled ? 'default' : 'pointer',
     boxShadow: disabled ? 'none' : '0 2px 6px rgba(0,0,0,0.4)',
     transition: 'background 0.12s',

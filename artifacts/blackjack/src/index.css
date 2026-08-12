@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @plugin "@tailwindcss/typography";
@@ -67,79 +67,80 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* LIGHT MODE */
+/* ── PALETTE ─────────────────────────────────────────────────────────────── */
+/* Deep obsidian blue-black — replaces the old muddy dark-green */
 :root {
-  --background: 150 25% 6%;
-  --foreground: 43 45% 90%;
-  --border: 150 15% 18%;
-  --card: 150 22% 9%;
-  --card-foreground: 43 45% 90%;
-  --card-border: 150 15% 18%;
-  --sidebar: 150 25% 6%;
-  --sidebar-foreground: 43 45% 90%;
-  --sidebar-border: 150 15% 18%;
-  --sidebar-primary: 43 70% 52%;
-  --sidebar-primary-foreground: 150 25% 6%;
-  --sidebar-accent: 150 22% 13%;
-  --sidebar-accent-foreground: 43 45% 90%;
-  --sidebar-ring: 43 70% 52%;
-  --popover: 150 22% 9%;
-  --popover-foreground: 43 45% 90%;
-  --popover-border: 150 15% 18%;
-  --primary: 43 70% 52%;
-  --primary-foreground: 150 25% 6%;
-  --secondary: 150 22% 13%;
-  --secondary-foreground: 43 45% 90%;
-  --muted: 150 18% 12%;
-  --muted-foreground: 150 12% 55%;
-  --accent: 150 22% 13%;
-  --accent-foreground: 43 45% 90%;
+  --background: 240 38% 4%;        /* #060610 — deep obsidian */
+  --foreground: 40 30% 92%;        /* warm white */
+  --border: 240 22% 13%;
+  --card: 240 30% 7%;              /* #0d0d1c */
+  --card-foreground: 40 30% 92%;
+  --card-border: 240 22% 14%;
+  --sidebar: 240 38% 4%;
+  --sidebar-foreground: 40 30% 92%;
+  --sidebar-border: 240 22% 13%;
+  --sidebar-primary: 42 88% 58%;
+  --sidebar-primary-foreground: 240 38% 4%;
+  --sidebar-accent: 240 25% 11%;
+  --sidebar-accent-foreground: 40 30% 92%;
+  --sidebar-ring: 42 88% 58%;
+  --popover: 240 30% 7%;
+  --popover-foreground: 40 30% 92%;
+  --popover-border: 240 22% 14%;
+  --primary: 42 88% 58%;           /* vibrant champagne gold #f0b830 */
+  --primary-foreground: 240 38% 4%;
+  --secondary: 240 25% 11%;
+  --secondary-foreground: 40 30% 92%;
+  --muted: 240 22% 10%;
+  --muted-foreground: 240 12% 52%;
+  --accent: 240 25% 11%;
+  --accent-foreground: 40 30% 92%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 98%;
-  --input: 150 15% 20%;
-  --ring: 43 70% 52%;
-  --chart-1: 43 70% 52%;
+  --input: 240 22% 12%;
+  --ring: 42 88% 58%;
+  --chart-1: 42 88% 58%;
   --chart-2: 150 40% 40%;
   --chart-3: 0 72% 51%;
   --chart-4: 220 70% 60%;
   --chart-5: 280 65% 60%;
   --radius: 0.5rem;
-  --app-font-sans: 'Playfair Display', serif;
-  --app-font-serif: 'Playfair Display', serif;
+  --app-font-sans: 'Inter', system-ui, sans-serif;
+  --app-font-serif: 'Playfair Display', Georgia, serif;
   --app-font-mono: Menlo, monospace;
 }
 
 .dark {
-  --background: 150 25% 6%;
-  --foreground: 43 45% 90%;
-  --border: 150 15% 18%;
-  --card: 150 22% 9%;
-  --card-foreground: 43 45% 90%;
-  --card-border: 150 15% 18%;
-  --sidebar: 150 25% 6%;
-  --sidebar-foreground: 43 45% 90%;
-  --sidebar-border: 150 15% 18%;
-  --sidebar-primary: 43 70% 52%;
-  --sidebar-primary-foreground: 150 25% 6%;
-  --sidebar-accent: 150 22% 13%;
-  --sidebar-accent-foreground: 43 45% 90%;
-  --sidebar-ring: 43 70% 52%;
-  --popover: 150 22% 9%;
-  --popover-foreground: 43 45% 90%;
-  --popover-border: 150 15% 18%;
-  --primary: 43 70% 52%;
-  --primary-foreground: 150 25% 6%;
-  --secondary: 150 22% 13%;
-  --secondary-foreground: 43 45% 90%;
-  --muted: 150 18% 12%;
-  --muted-foreground: 150 12% 55%;
-  --accent: 150 22% 13%;
-  --accent-foreground: 43 45% 90%;
+  --background: 240 38% 4%;
+  --foreground: 40 30% 92%;
+  --border: 240 22% 13%;
+  --card: 240 30% 7%;
+  --card-foreground: 40 30% 92%;
+  --card-border: 240 22% 14%;
+  --sidebar: 240 38% 4%;
+  --sidebar-foreground: 40 30% 92%;
+  --sidebar-border: 240 22% 13%;
+  --sidebar-primary: 42 88% 58%;
+  --sidebar-primary-foreground: 240 38% 4%;
+  --sidebar-accent: 240 25% 11%;
+  --sidebar-accent-foreground: 40 30% 92%;
+  --sidebar-ring: 42 88% 58%;
+  --popover: 240 30% 7%;
+  --popover-foreground: 40 30% 92%;
+  --popover-border: 240 22% 14%;
+  --primary: 42 88% 58%;
+  --primary-foreground: 240 38% 4%;
+  --secondary: 240 25% 11%;
+  --secondary-foreground: 40 30% 92%;
+  --muted: 240 22% 10%;
+  --muted-foreground: 240 12% 52%;
+  --accent: 240 25% 11%;
+  --accent-foreground: 40 30% 92%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 98%;
-  --input: 150 15% 20%;
-  --ring: 43 70% 52%;
-  --chart-1: 43 70% 52%;
+  --input: 240 22% 12%;
+  --ring: 42 88% 58%;
+  --chart-1: 42 88% 58%;
   --chart-2: 150 40% 40%;
   --chart-3: 0 72% 51%;
   --chart-4: 220 70% 60%;
@@ -156,6 +157,7 @@
   }
 }
 
+/* ── FELT TABLE ────────────────────────────────────────────────────────────── */
 .table-felt {
   background: radial-gradient(circle at 50% 150%, #0d3824 0%, #04180d 80%);
 }
@@ -166,8 +168,36 @@
   border-radius: 400px 400px 20px 20px;
 }
 
+/* ── GOLD GRADIENT TEXT ────────────────────────────────────────────────────── */
 .gold-accent {
-  background: linear-gradient(135deg, #dfa938 0%, #ffd479 50%, #b27a20 100%);
+  background: linear-gradient(135deg, #c8900a 0%, #f5cc50 40%, #fde68a 65%, #d4a020 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── LOBBY ANIMATIONS ─────────────────────────────────────────────────────── */
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+  50%       { transform: translateY(-18px) rotate(var(--rot, 0deg)); }
+}
+@keyframes float-med {
+  0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+  50%       { transform: translateY(-12px) rotate(var(--rot, 0deg)); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.suit-float-slow { animation: float-slow 7s ease-in-out infinite; }
+.suit-float-med  { animation: float-med 5.5s ease-in-out infinite; }
+
+.shimmer-text {
+  background: linear-gradient(90deg, #c8900a 0%, #f5cc50 30%, #fff8e7 50%, #f5cc50 70%, #c8900a 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s linear infinite;
 }
