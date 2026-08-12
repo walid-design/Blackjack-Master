@@ -402,10 +402,22 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
 
   // Delay the score/bust badge until all staggered card animations have landed.
+  // IMPORTANT: we must explicitly reset badgeReady=false at the start of the SETTLEMENT
+  // branch, because the DEALER_TURN branch sets it to true with no cleanup — if we don't
+  // reset it, it stays true when DEALER_PLAY fires and the bust/total badge appears while
+  // extra dealer cards are still mid-flight from the shoe.
   const [badgeReady, setBadgeReady] = useState(false);
   useEffect(() => {
     if (!revealed || dealerCards.length === 0) { setBadgeReady(false); return; }
-    if (state.phase !== 'SETTLEMENT') { setBadgeReady(true); return; }
+    if (state.phase !== 'SETTLEMENT') {
+      // During DEALER_TURN the hole card is visible — show running total immediately.
+      // But only if no extra cards will arrive (i.e. we won't later get a surprise jump).
+      setBadgeReady(true);
+      return;
+    }
+    // Phase just became SETTLEMENT (DEALER_PLAY fired, possibly adding extra cards).
+    // Hide badge instantly, then reveal after all stagger animations have settled.
+    setBadgeReady(false);
     const delay = Math.max(400, (dealerCards.length - 1) * 450 + 500);
     const t = setTimeout(() => setBadgeReady(true), delay);
     return () => { clearTimeout(t); setBadgeReady(false); };
