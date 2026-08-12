@@ -336,8 +336,9 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       seat.hands.splice(hi, 1, hand1, hand2);
       s.seats[s.activeSeatIndex] = seat;
 
-      // Enter SPLIT_DEALING — Table.tsx will dispatch SPLIT_CARD twice with 550ms gaps
-      return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 0 };
+      // Enter SPLIT_DEALING — Table.tsx will dispatch SPLIT_CARD twice with 550ms gaps.
+      // Deal to hand[1] (right) first, then hand[0] (left) — standard casino convention.
+      return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 1 };
     }
 
     case 'SPLIT_CARD': {
@@ -360,9 +361,9 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       seat.hands[targetHandIdx] = hand;
       s.seats[s.activeSeatIndex] = seat;
 
-      if (targetHandIdx === 0) {
-        // First card dealt — wait for second SPLIT_CARD
-        return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 1 };
+      if (targetHandIdx === 1) {
+        // Right hand received its card — now deal to the left hand (hand[0])
+        return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 0 };
       }
 
       // Both cards dealt — evaluate immediate side bets, then start player turn

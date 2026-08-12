@@ -163,7 +163,8 @@ export default function Table() {
     if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
       const cardCount: number = (state.dealerCards || []).length;
       // last card stagger: (cardCount-1)*120ms + spring settle ~650ms
-      const delay = Math.max(700, (cardCount - 1) * 120 + 650);
+      // Last extra dealer card lands at (cardCount-1)*450ms; add 700ms for animation settle.
+      const delay = Math.max(800, (cardCount - 1) * 450 + 700);
       const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
       return () => clearTimeout(t);
     }
@@ -405,7 +406,7 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
   useEffect(() => {
     if (!revealed || dealerCards.length === 0) { setBadgeReady(false); return; }
     if (state.phase !== 'SETTLEMENT') { setBadgeReady(true); return; }
-    const delay = Math.max(350, (dealerCards.length - 1) * 120 + 500);
+    const delay = Math.max(400, (dealerCards.length - 1) * 450 + 500);
     const t = setTimeout(() => setBadgeReady(true), delay);
     return () => { clearTimeout(t); setBadgeReady(false); };
   }, [state.phase, dealerCards.length, revealed]);
@@ -433,8 +434,9 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
       <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
         <AnimatePresence>
           {dealerCards.map((card, i) => {
-            // Cards beyond the initial 2 are drawn during DEALER_PLAY — stagger them.
-            const extraDelay = i >= 2 ? (i - 2) * 0.14 : 0;
+            // Cards beyond the initial 2 are drawn during DEALER_PLAY — stagger so each
+            // card visibly lands before the next one leaves the shoe (450ms per card).
+            const extraDelay = i >= 2 ? (i - 1) * 0.45 : 0;
             return (
               <motion.div
                 key={`dc-${i}`}
@@ -659,6 +661,18 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
   // Cards zone:   bottom:40 → bottom of card area is 40px above arc centre
   // Bet circle:   top:-33, left:-33 → 66×66 centred on arc
   // Below zone:   top:40 → top of buttons/side-bets is 40px below arc centre
+
+  // Smart horizontal anchor for floating badges/popups so right-edge seats never
+  // overflow off screen. Because Framer Motion owns the CSS `transform` property,
+  // we express centering as a motion `x` value instead of CSS translateX(-50%).
+  const popAnchorStyle: React.CSSProperties =
+    seatXPct < 33  ? { left: -R }
+    : seatXPct > 67 ? { right: -R, left: 'auto' }
+    : { left: '50%' };
+  // x value passed into Framer Motion so it handles translateX without conflict
+  const popAnchorX: string | number =
+    (seatXPct >= 33 && seatXPct <= 67) ? '-50%' : 0;
+
   return (
     <div style={{ position: 'relative', width: 0, height: 0 }}>
 
@@ -818,13 +832,13 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           .map((res: any, idx: number) => (
             <motion.div
               key={`sbr-imm-${idx}`}
-              initial={{ opacity: 0, y: 0 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8 }}
+              initial={{ opacity: 0, y: 0, x: popAnchorX }}
+              animate={{ opacity: 1, y: 0, x: popAnchorX }}
+              exit={{ opacity: 0, scale: 0.8, x: popAnchorX }}
               style={{
                 position: 'absolute',
                 bottom: 40,
-                left: '50%', transform: 'translateX(-50%)',
+                ...popAnchorStyle,
                 zIndex: 80, pointerEvents: 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
               }}
@@ -844,12 +858,12 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         if (!visible) return null;
         return (
           <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            initial={{ opacity: 0, scale: 0.8, y: -10, x: popAnchorX }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: popAnchorX }}
             style={{
               position: 'absolute',
               bottom: 40 + 180,   // float high above the cards
-              left: '50%', transform: 'translateX(-50%)',
+              ...popAnchorStyle,
               zIndex: 60,
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
               pointerEvents: 'none',
@@ -887,13 +901,13 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           .map((res: any, idx: number) => (
             <motion.div
               key={`sbr-end-${idx}`}
-              initial={{ opacity: 0, y: 0 }}
-              animate={{ opacity: [0, 1, 1, 0], y: [0, -30, -55, -80] }}
+              initial={{ opacity: 0, y: 0, x: popAnchorX }}
+              animate={{ opacity: [0, 1, 1, 0], y: [0, -30, -55, -80], x: popAnchorX }}
               transition={{ duration: 1.8, delay: idx * 0.18, times: [0, 0.1, 0.75, 1] }}
               style={{
                 position: 'absolute',
                 bottom: 40,
-                left: '50%', transform: 'translateX(-50%)',
+                ...popAnchorStyle,
                 zIndex: 80, pointerEvents: 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
               }}
@@ -916,10 +930,10 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
       {/* ── BET CIRCLE (anchored at arc point) ── */}
       {/* Insurance prompt floats above the circle */}
       {isInsurance && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{
+        <motion.div initial={{ opacity: 0, y: 8, x: popAnchorX }} animate={{ opacity: 1, y: 0, x: popAnchorX }} style={{
           position: 'absolute', bottom: 40 + 8,
-          left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(4,8,5,0.97)', border: '1px solid rgba(212,168,32,0.5)',
+          ...popAnchorStyle,
+          background: 'rgba(15,18,36,0.97)', border: '1px solid rgba(240,184,48,0.5)',
           borderRadius: 8, padding: '10px 14px', textAlign: 'center',
           zIndex: 50, minWidth: 140, boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
         }}>
