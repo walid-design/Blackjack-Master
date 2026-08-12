@@ -1018,35 +1018,39 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         </div>
       )}
 
-      {/* Action buttons — desktop only; mobile uses PlayerActionStrip at Table level */}
+      {/* Action buttons — desktop only; mobile uses PlayerActionStrip at Table level.
+          Positioning is on a plain div (not motion.div) so Framer Motion's transform
+          compositor never clobbers the CSS translateX anchor. Right-edge seats use
+          `right: -R` (panel's right edge pins to the circle's right edge, grows left).
+          Left-edge seats use `left: -R`. Center seats use left:0 + translateX(-50%). */}
       <AnimatePresence>
         {!isMobile && isPlayerTurn && !hasNaturalBJ && (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.92 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.92 }}
-            transition={{ type: 'spring', stiffness: 340, damping: 28 }}
-            style={{
-              position: 'absolute', top: R + 8,
-              // Smart anchor — mirrors side-bet panel so right-edge seats never overflow
-              ...(seatXPct < 33
-                ? { left: -R,    transform: 'translateX(0)' }
-                : seatXPct > 67
-                ? { left:  R,    transform: 'translateX(-100%)' }
-                : { left: '0px', transform: 'translateX(-50%)' }),
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button data-testid="button-hit"   onClick={() => dispatch({ type: 'HIT' })}   style={feltActionBtn(false, true)}>Hit</button>
-              <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND' })} style={feltActionBtn(false, false)}>Stand</button>
-            </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button data-testid="button-double"    onClick={() => canDouble    && dispatch({ type: 'DOUBLE' })}    style={feltActionBtn(!canDouble,    false)}>Double</button>
-              <button data-testid="button-split"     onClick={() => canSplit     && dispatch({ type: 'SPLIT' })}     style={feltActionBtn(!canSplit,     false)}>Split</button>
-              <button data-testid="button-surrender" onClick={() => canSurrender && dispatch({ type: 'SURRENDER' })} style={feltActionBtn(!canSurrender, false)}>Surr.</button>
-            </div>
-          </motion.div>
+          <div style={{
+            position: 'absolute', top: R + 8,
+            ...(seatXPct < 33
+              ? { left: -R }                              // left seats: pin left edge to circle's left
+              : seatXPct > 67
+              ? { right: -R, left: 'auto' }               // right seats: pin right edge to circle's right, grows left
+              : { left: '50%', transform: 'translateX(-50%)' }), // center: centered on arc point
+          }}>
+            <motion.div
+              initial={{ opacity: 0, y: -6, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.92 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
+            >
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button data-testid="button-hit"   onClick={() => dispatch({ type: 'HIT' })}   style={feltActionBtn(false, true)}>Hit</button>
+                <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND' })} style={feltActionBtn(false, false)}>Stand</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button data-testid="button-double"    onClick={() => canDouble    && dispatch({ type: 'DOUBLE' })}    style={feltActionBtn(!canDouble,    false)}>Double</button>
+                <button data-testid="button-split"     onClick={() => canSplit     && dispatch({ type: 'SPLIT' })}     style={feltActionBtn(!canSplit,     false)}>Split</button>
+                <button data-testid="button-surrender" onClick={() => canSurrender && dispatch({ type: 'SURRENDER' })} style={feltActionBtn(!canSurrender, false)}>Surr.</button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
