@@ -181,7 +181,7 @@ export default function Table() {
   return (
     <div style={{
       height: '100dvh', display: 'flex', flexDirection: 'column',
-      background: '#010403', overflow: 'hidden',
+      background: '#0d1020', overflow: 'hidden',
       userSelect: 'none', fontFamily: "'Playfair Display', serif", color: '#f0e6c8',
     }}>
 
@@ -190,7 +190,7 @@ export default function Table() {
         height: 46, flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 16px',
-        background: 'rgba(6,6,16,0.98)',
+        background: 'rgba(15,18,36,0.98)',
         borderBottom: '1px solid rgba(240,184,48,0.12)',
         zIndex: 30,
       }}>
@@ -237,7 +237,7 @@ export default function Table() {
       {dealerHistory.length > 0 && (
         <div style={{
           height: 28, flexShrink: 0,
-          background: 'rgba(0,0,0,0.55)',
+          background: 'rgba(12,15,30,0.80)',
           borderBottom: '1px solid rgba(240,184,48,0.08)',
           display: 'flex', alignItems: 'center',
           padding: '0 12px', gap: 6,
@@ -267,7 +267,7 @@ export default function Table() {
       )}
 
       {/* ── GAME AREA (felt table) ── */}
-      <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#010403' }}>
+      <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#0d1020' }}>
 
         {/* FELT */}
         <div style={{
@@ -1298,7 +1298,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
     return (
       <div style={{
         flexShrink: 0,
-        background: 'rgba(6,6,16,0.98)',
+        background: 'rgba(15,18,36,0.98)',
         borderTop: '1px solid rgba(240,184,48,0.12)',
         padding: '8px 12px 10px',
         display: 'flex', flexDirection: 'column', gap: 8,
@@ -1367,7 +1367,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
   return (
     <div style={{
       height: 118, flexShrink: 0,
-      background: 'rgba(6,6,16,0.98)',
+      background: 'rgba(15,18,36,0.98)',
       borderTop: '1px solid rgba(240,184,48,0.12)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 16px', gap: 10, zIndex: 30,

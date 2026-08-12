@@ -62,7 +62,7 @@ export default function Lobby() {
 
   return (
     <div className="min-h-[100dvh] w-full flex flex-col relative overflow-hidden"
-      style={{ background: 'radial-gradient(ellipse 120% 80% at 50% 0%, #0c0c22 0%, #060610 55%, #020208 100%)' }}
+      style={{ background: 'radial-gradient(ellipse 120% 80% at 50% 0%, #1e2245 0%, #131729 55%, #0e1228 100%)' }}
     >
       {/* ── Decorative floating suits ── */}
       {BG_SUITS.map((s, i) => (
@@ -87,13 +87,13 @@ export default function Lobby() {
       <div style={{
         position: 'absolute', top: '-10%', left: '50%', transform: 'translateX(-50%)',
         width: 700, height: 400,
-        background: 'radial-gradient(ellipse, rgba(240,184,48,0.07) 0%, transparent 70%)',
+        background: 'radial-gradient(ellipse, rgba(240,184,48,0.11) 0%, transparent 70%)',
         pointerEvents: 'none',
       }} />
       <div style={{
         position: 'absolute', bottom: '5%', left: '20%',
         width: 400, height: 300,
-        background: 'radial-gradient(ellipse, rgba(99,102,241,0.06) 0%, transparent 70%)',
+        background: 'radial-gradient(ellipse, rgba(99,102,241,0.09) 0%, transparent 70%)',
         pointerEvents: 'none',
       }} />
 
@@ -150,12 +150,12 @@ export default function Lobby() {
               transition={{ duration: 0.45, ease: [0.22, 0, 0.18, 1] }}
               style={{
                 width: '100%', maxWidth: 420,
-                background: 'rgba(13,13,30,0.82)',
+                background: 'rgba(24,28,54,0.90)',
                 backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(240,184,48,0.14)',
+                border: '1px solid rgba(240,184,48,0.20)',
                 borderRadius: 16,
                 padding: '36px 32px 32px',
-                boxShadow: '0 0 0 1px rgba(255,255,255,0.04), 0 24px 80px rgba(0,0,0,0.6), 0 0 60px rgba(240,184,48,0.06)',
+                boxShadow: '0 0 0 1px rgba(255,255,255,0.09), 0 24px 80px rgba(8,10,22,0.55), 0 0 60px rgba(240,184,48,0.06)',
                 position: 'relative', overflow: 'hidden',
               }}
             >
@@ -191,7 +191,7 @@ export default function Lobby() {
                     placeholder="Enter your name"
                     style={{
                       width: '100%', boxSizing: 'border-box',
-                      background: 'rgba(255,255,255,0.04)',
+                      background: 'rgba(255,255,255,0.09)',
                       border: `1px solid ${nameError ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.1)'}`,
                       borderRadius: 8, padding: '13px 16px',
                       color: '#f5ead8', fontSize: 15,
@@ -199,7 +199,7 @@ export default function Lobby() {
                       outline: 'none', transition: 'border-color 0.15s',
                     }}
                     onFocus={e => { e.currentTarget.style.borderColor = 'rgba(240,184,48,0.45)'; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = nameError ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.1)'; }}
+                    onBlur={e => { e.currentTarget.style.borderColor = nameError ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.16)'; }}
                   />
                   {nameError && (
                     <p style={{ fontSize: 11, color: '#f87171', marginTop: 5, fontFamily: 'Inter, sans-serif' }}>
@@ -226,9 +226,9 @@ export default function Lobby() {
                           borderRadius: 7,
                           border: `1px solid ${buyIn === amount ? 'rgba(240,184,48,0.7)' : 'rgba(255,255,255,0.08)'}`,
                           background: buyIn === amount
-                            ? 'linear-gradient(135deg, rgba(240,184,48,0.18), rgba(253,230,138,0.08))'
-                            : 'rgba(255,255,255,0.03)',
-                          color: buyIn === amount ? '#f5cc50' : 'rgba(240,230,210,0.45)',
+                            ? 'linear-gradient(135deg, rgba(240,184,48,0.22), rgba(253,230,138,0.10))'
+                            : 'rgba(255,255,255,0.07)',
+                          color: buyIn === amount ? '#f5cc50' : 'rgba(220,225,240,0.65)',
                           fontSize: 13, fontWeight: 600,
                           fontFamily: 'Inter, sans-serif',
                           cursor: 'pointer',
@@ -344,15 +344,15 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
       onMouseLeave={() => setHovered(false)}
       style={{
         position: 'relative',
-        background: 'rgba(13,13,28,0.9)',
+        background: 'rgba(22,26,52,0.92)',
         border: `1px solid ${hovered ? 'rgba(240,184,48,0.25)' : 'rgba(255,255,255,0.07)'}`,
         borderRadius: 14,
         overflow: 'hidden',
         display: 'flex', flexDirection: 'column',
         cursor: 'pointer',
         boxShadow: hovered
-          ? `0 20px 60px rgba(0,0,0,0.55), 0 0 40px ${accent.glow}`
-          : '0 8px 30px rgba(0,0,0,0.4)',
+          ? `0 20px 60px rgba(12,15,32,0.70), 0 0 40px ${accent.glow}`
+          : '0 8px 30px rgba(15,18,38,0.35)',
         transform: hovered ? 'translateY(-3px)' : 'translateY(0)',
         transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
       }}
@@ -362,7 +362,7 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
         <div style={{
           position: 'absolute', top: 12, right: 12, zIndex: 10,
           padding: '3px 10px',
-          background: 'rgba(0,0,0,0.55)',
+          background: 'rgba(12,15,32,0.70)',
           border: '1px solid rgba(240,184,48,0.35)',
           borderRadius: 999,
           fontSize: 8, fontWeight: 700, letterSpacing: '0.2em',
@@ -401,7 +401,7 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
             fontFamily: "'Playfair Display', serif",
             fontSize: 20, fontWeight: 700,
             color: '#f5ead8', lineHeight: 1,
-            textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+            textShadow: '0 1px 6px rgba(8,10,22,0.55)',
           }}>
             {table.name}
           </h3>
@@ -420,7 +420,7 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
         {/* Bet limits */}
         <div style={{
           display: 'flex', gap: 0,
-          background: 'rgba(255,255,255,0.03)',
+          background: 'rgba(255,255,255,0.08)',
           border: '1px solid rgba(255,255,255,0.06)',
           borderRadius: 8, overflow: 'hidden',
         }}>
@@ -449,7 +449,7 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
                 fontSize: 9, fontWeight: 600,
                 letterSpacing: '0.1em', textTransform: 'uppercase',
                 padding: '3px 8px',
-                background: 'rgba(255,255,255,0.04)',
+                background: 'rgba(255,255,255,0.09)',
                 border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: 4,
                 color: 'rgba(240,230,210,0.4)',
