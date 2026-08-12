@@ -157,6 +157,14 @@ export default function Table() {
     return () => clearTimeout(t);
   }, [state.phase]);
 
+  // Auto-advance to next round 3.5 s after settlement results are revealed —
+  // live-casino feel; player can also click "Deal Now" to skip the wait.
+  useEffect(() => {
+    if (!(state as any).settled) return;
+    const t = setTimeout(() => dispatch({ type: 'NEXT_ROUND' }), 3500);
+    return () => clearTimeout(t);
+  }, [(state as any).settled]);
+
   // Trigger settlement — delay grows with dealer card count so all stagger
   // animations (delay: i × 120ms) finish before results are revealed.
   useEffect(() => {
@@ -600,6 +608,64 @@ function cardDealOrigin(
   return { x: shoeX - seatX, y: shoeY - seatY };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BonusPaidToast — self-dismissing toast that appears when an immediate side-bet
+// win is paid, then fades out after 2.5 s. Uses AnimatePresence for the exit.
+// ─────────────────────────────────────────────────────────────────────────────
+function BonusPaidToast({
+  wins, anchorStyle, anchorX,
+}: { wins: any[]; anchorStyle: React.CSSProperties; anchorX: string | number }) {
+  const [visible, setVisible] = useState(true);
+
+  // Re-arm the timer whenever the win list changes (new split hand wins etc.)
+  useEffect(() => {
+    setVisible(true);
+    const t = setTimeout(() => setVisible(false), 2500);
+    return () => clearTimeout(t);
+  }, [wins.map((w: any) => w.betName).join(',')]);
+
+  if (wins.length === 0) return null;
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          key="bonus-toast"
+          initial={{ opacity: 0, scale: 0.82, y: -8, x: anchorX }}
+          animate={{ opacity: 1, scale: 1,    y:  0, x: anchorX }}
+          exit={{    opacity: 0, scale: 0.88, y: -6, x: anchorX }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+          style={{
+            position: 'absolute',
+            bottom: 40 + 180,
+            ...anchorStyle,
+            zIndex: 60,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{
+            fontSize: 8, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase',
+            color: 'rgba(240,184,48,0.65)', fontFamily: 'Inter, sans-serif', marginBottom: 1,
+          }}>Bonus Paid ✓</div>
+          {wins.map((res: any, i: number) => (
+            <div key={i} style={{
+              background: 'linear-gradient(135deg,#7a5a0e,#d4a820,#7a5a0e)',
+              borderRadius: 5, padding: '4px 14px',
+              fontSize: 10, fontWeight: 800, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: '#000',
+              fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap',
+              boxShadow: '0 0 14px rgba(212,168,32,0.45)',
+            }}>
+              {res.betName}  +${res.payout}
+            </div>
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
@@ -863,49 +929,12 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           ))}
       </AnimatePresence>
 
-      {/* Persistent "BONUS PAID" badge — stays visible during PLAYER_TURN */}
-      {(() => {
-        const immWins = (seat.sideBetResults || []).filter((r: any) => r.win && r.immediate);
-        if (immWins.length === 0) return null;
-        // Show during player turn (before settlement)
-        const visible = state.phase === 'PLAYER_TURN' || state.phase === 'DEALER_TURN';
-        if (!visible) return null;
-        return (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: -10, x: popAnchorX }}
-            animate={{ opacity: 1, scale: 1, y: 0, x: popAnchorX }}
-            style={{
-              position: 'absolute',
-              bottom: 40 + 180,   // float high above the cards
-              ...popAnchorStyle,
-              zIndex: 60,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              pointerEvents: 'none',
-            }}
-          >
-            <div style={{
-              fontSize: 8, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase',
-              color: 'rgba(212,168,32,0.65)', fontFamily: 'sans-serif', marginBottom: 1,
-            }}>Bonus Paid ✓</div>
-            {immWins.map((res: any, i: number) => (
-              <motion.div
-                key={i}
-                animate={{ boxShadow: ['0 0 8px rgba(212,168,32,0.4)', '0 0 20px rgba(212,168,32,0.8)', '0 0 8px rgba(212,168,32,0.4)'] }}
-                transition={{ repeat: Infinity, duration: 2, delay: i * 0.3 }}
-                style={{
-                  background: 'linear-gradient(135deg,#7a5a0e,#d4a820,#7a5a0e)',
-                  borderRadius: 5, padding: '4px 12px',
-                  fontSize: 10, fontWeight: 800, letterSpacing: '0.1em',
-                  textTransform: 'uppercase', color: '#000',
-                  fontFamily: 'sans-serif', whiteSpace: 'nowrap',
-                }}
-              >
-                {res.betName}  +${res.payout}
-              </motion.div>
-            ))}
-          </motion.div>
-        );
-      })()}
+      {/* Self-dismissing bonus paid toast (2.5 s) */}
+      <BonusPaidToast
+        wins={(seat.sideBetResults || []).filter((r: any) => r.win && r.immediate)}
+        anchorStyle={popAnchorStyle}
+        anchorX={popAnchorX}
+      />
 
       {/* SETTLEMENT wins (Super Sevens, Bust It, Insurance — end-of-round only):
           Flying chip burst + label when settlement results appear */}
@@ -1372,10 +1401,8 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
               <motion.button
                 data-testid="button-next-round"
                 onClick={() => dispatch({ type: 'NEXT_ROUND' })}
-                animate={{ boxShadow: ['0 4px 14px rgba(212,168,32,0.3)', '0 4px 28px rgba(212,168,32,0.65)', '0 4px 14px rgba(212,168,32,0.3)'] }}
-                transition={{ repeat: Infinity, duration: 1.4 }}
-                style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}
-              >Next Round</motion.button>
+                style={{ ...ghostBtn, padding: '6px 14px', fontSize: 10, color: 'rgba(240,184,48,0.7)', borderColor: 'rgba(240,184,48,0.25)' }}
+              >Deal Now ▶</motion.button>
             )}
             {state.phase === 'DEALING' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Dealing…</div>}
             {state.phase === 'INSURANCE' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Insurance at seat</div>}
@@ -1471,10 +1498,8 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
           <motion.button
             data-testid="button-next-round"
             onClick={() => dispatch({ type: 'NEXT_ROUND' })}
-            animate={{ boxShadow: ['0 4px 14px rgba(212,168,32,0.3)', '0 4px 28px rgba(212,168,32,0.65)', '0 4px 14px rgba(212,168,32,0.3)'] }}
-            transition={{ repeat: Infinity, duration: 1.4 }}
-            style={goldBtn}
-          >Next Round</motion.button>
+            style={{ ...ghostBtn, color: 'rgba(240,184,48,0.7)', borderColor: 'rgba(240,184,48,0.25)' }}
+          >Deal Now ▶</motion.button>
         )}
         {state.phase === 'DEALING'     && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>}
         {state.phase === 'INSURANCE'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>}
