@@ -133,6 +133,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
           }],
         };
       });
+      // Clear lastBets so a second Repeat click is a no-op (no double-charge)
+      s.lastBets = null;
       return s;
     }
 
