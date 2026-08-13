@@ -38,6 +38,8 @@ export default function Lobby() {
   const [hasVisited, setHasVisited]   = useState(false);
   const [bankroll, setBankroll]       = useState(0);
   const [nameError, setNameError]     = useState(false);
+  const [showRebuy, setShowRebuy]     = useState(false);
+  const [rebuyAmount, setRebuyAmount] = useState<number>(1_000);
 
   useEffect(() => {
     const savedName     = localStorage.getItem('bj_player_name');
@@ -56,6 +58,12 @@ export default function Lobby() {
     setBankroll(buyIn);
     setHasVisited(true);
     setNameError(false);
+  };
+
+  const handleRebuy = () => {
+    localStorage.setItem('bj_bankroll', rebuyAmount.toString());
+    setBankroll(rebuyAmount);
+    setShowRebuy(false);
   };
 
   const handleJoinTable = (tableId: string) => setLocation(`/table/${tableId}`);
@@ -293,17 +301,75 @@ export default function Lobby() {
                 <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 700, color: '#f5ead8', marginBottom: 12 }}>
                   {playerName}
                 </h2>
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 10,
-                  padding: '8px 22px',
-                  background: 'rgba(240,184,48,0.07)',
-                  border: '1px solid rgba(240,184,48,0.18)',
-                  borderRadius: 999,
-                }}>
-                  <span style={{ fontSize: 11, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.5)', fontFamily: 'Inter, sans-serif' }}>Stack</span>
-                  <span style={{ fontSize: 20, fontWeight: 700, color: '#f0b830', fontFamily: 'Inter, sans-serif', letterSpacing: '-0.01em' }}>
-                    ${bankroll.toLocaleString()}
-                  </span>
+
+                {/* Stack pill + Change Stack toggle */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '8px 22px', background: 'rgba(240,184,48,0.07)', border: '1px solid rgba(240,184,48,0.18)', borderRadius: 999 }}>
+                    <span style={{ fontSize: 11, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.5)', fontFamily: 'Inter, sans-serif' }}>Stack</span>
+                    <span style={{ fontSize: 20, fontWeight: 700, color: '#f0b830', fontFamily: 'Inter, sans-serif', letterSpacing: '-0.01em' }}>
+                      ${bankroll.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setShowRebuy(v => !v)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                      color: 'rgba(240,184,48,0.45)', fontFamily: 'Inter, sans-serif',
+                      textDecoration: 'underline', textUnderlineOffset: 3, padding: 0,
+                    }}
+                  >
+                    {showRebuy ? 'Cancel' : 'Change Stack'}
+                  </button>
+
+                  {/* Rebuy panel */}
+                  <AnimatePresence>
+                    {showRebuy && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: 'auto' }}
+                        exit={{ opacity: 0, y: -8, height: 0 }}
+                        transition={{ duration: 0.22 }}
+                        style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, paddingTop: 4 }}
+                      >
+                        {/* Amount chips */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                          {BUY_INS.map(amt => (
+                            <button
+                              key={amt}
+                              onClick={() => setRebuyAmount(amt)}
+                              style={{
+                                padding: '6px 18px',
+                                borderRadius: 999,
+                                border: `1px solid ${rebuyAmount === amt ? 'rgba(240,184,48,0.7)' : 'rgba(255,255,255,0.12)'}`,
+                                background: rebuyAmount === amt ? 'rgba(240,184,48,0.12)' : 'rgba(255,255,255,0.04)',
+                                color: rebuyAmount === amt ? '#f0b830' : 'rgba(255,255,255,0.45)',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: 13, fontWeight: 600,
+                                cursor: 'pointer', transition: 'all 0.15s',
+                              }}
+                            >
+                              ${amt.toLocaleString()}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={handleRebuy}
+                          style={{
+                            padding: '8px 32px',
+                            background: 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)',
+                            border: 'none', borderRadius: 4,
+                            color: '#000', fontWeight: 700, fontSize: 12,
+                            letterSpacing: '0.18em', textTransform: 'uppercase',
+                            fontFamily: 'Inter, sans-serif', cursor: 'pointer',
+                          }}
+                        >
+                          Set Stack to ${rebuyAmount.toLocaleString()}
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </motion.div>
 
