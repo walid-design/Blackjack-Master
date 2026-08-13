@@ -153,7 +153,7 @@ export default function Table() {
   // Dealer plays after 1.4s pause
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
-    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 3000);
+    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 1800);
     return () => clearTimeout(t);
   }, [state.phase]);
 
@@ -337,6 +337,88 @@ export default function Table() {
               />
             </div>
           ))}
+
+          {/* ── FLOATING BET CONTROLS — centered bottom of felt, desktop only ── */}
+          {!isMobile && state.phase === 'BETTING' && anyActive && (
+            <AnimatePresence>
+              <motion.div
+                key="floating-bet-hud"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22 }}
+                style={{
+                  position: 'absolute',
+                  bottom: 18,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 40,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 8,
+                  pointerEvents: 'all',
+                }}
+              >
+                <div style={{
+                  background: 'rgba(8,10,24,0.82)',
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(240,184,48,0.22)',
+                  borderRadius: 12,
+                  padding: '10px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  boxShadow: '0 6px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
+                }}>
+                  {state.lastBets && Object.keys(state.lastBets.main).length > 0 && (
+                    <button
+                      data-testid="button-repeat-bet"
+                      onClick={() => dispatch({ type: 'REPEAT_BET' })}
+                      style={{
+                        padding: '6px 16px', fontSize: 10, fontWeight: 700,
+                        letterSpacing: '0.14em', textTransform: 'uppercase',
+                        fontFamily: 'Inter, sans-serif',
+                        color: 'rgba(240,184,48,0.85)',
+                        background: 'rgba(240,184,48,0.08)',
+                        border: '1px solid rgba(240,184,48,0.3)',
+                        borderRadius: 6, cursor: 'pointer',
+                      }}
+                    >↻ Repeat</button>
+                  )}
+                  <button
+                    data-testid="button-clear-bets"
+                    onClick={() => dispatch({ type: 'CLEAR_BETS' })}
+                    style={{
+                      padding: '6px 16px', fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.14em', textTransform: 'uppercase',
+                      fontFamily: 'Inter, sans-serif',
+                      color: 'rgba(255,255,255,0.45)',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 6, cursor: 'pointer',
+                    }}
+                  >Clear</button>
+                  {canDeal && (
+                    <button
+                      data-testid="button-deal"
+                      onClick={() => dispatch({ type: 'DEAL' })}
+                      style={{
+                        padding: '7px 28px', fontSize: 11, fontWeight: 800,
+                        letterSpacing: '0.22em', textTransform: 'uppercase',
+                        fontFamily: 'Inter, sans-serif',
+                        background: 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)',
+                        border: 'none', borderRadius: 6, color: '#000',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 16px rgba(212,168,32,0.45)',
+                      }}
+                    >Deal</button>
+                  )}
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          )}
         </div>
       </div>
 
@@ -1498,21 +1580,6 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             ))}
           </div>
         )}
-        {state.phase === 'BETTING' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            {state.lastBets && Object.keys(state.lastBets.main).length > 0 && (
-              <button
-                data-testid="button-repeat-bet"
-                onClick={() => dispatch({ type: 'REPEAT_BET' })}
-                style={{ ...ghostBtn, fontSize: 10, color: 'rgba(240,184,48,0.8)', borderColor: 'rgba(240,184,48,0.3)', padding: '5px 18px' }}
-              >↻ Repeat Last Bet</button>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={ghostBtn}>Clear Bets</button>
-              {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={goldBtn}>Deal</button>}
-            </div>
-          </div>
-        )}
         {state.phase === 'SETTLEMENT' && (state as any).settled && (
           <motion.button
             data-testid="button-next-round"
@@ -1520,6 +1587,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             style={{ ...ghostBtn, color: 'rgba(240,184,48,0.7)', borderColor: 'rgba(240,184,48,0.25)' }}
           >Deal Now ▶</motion.button>
         )}
+        {state.phase === 'BETTING'     && anyActive && <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.35)', fontFamily: 'sans-serif' }}>Place your bets</div>}
         {state.phase === 'DEALING'     && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>}
         {state.phase === 'INSURANCE'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>}
         {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealer's turn…</div>}
