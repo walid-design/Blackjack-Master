@@ -149,13 +149,13 @@ export default function Table() {
       (async () => {
         for (const seat of activeSeats) {
           dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-          await sleep(550);
+          await sleep(720);
         }
         dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-        await sleep(550);
+        await sleep(720);
         for (const seat of activeSeats) {
           dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-          await sleep(550);
+          await sleep(720);
         }
         dispatch({ type: 'CARD_DEALT', to: 'dealer' });
         await sleep(700);
@@ -173,9 +173,9 @@ export default function Table() {
     if (splitDealingRef.current) return;
     splitDealingRef.current = true;
     (async () => {
-      await sleep(550);
+      await sleep(720);
       dispatch({ type: 'SPLIT_CARD' }); // card to hand 0
-      await sleep(550);
+      await sleep(720);
       dispatch({ type: 'SPLIT_CARD' }); // card to hand 1 → transitions to PLAYER_TURN
     })();
   }, [state.phase, (state as any).splitCardTarget]);
@@ -632,10 +632,11 @@ function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
     if (!faceDown && wasDown) {
       // Rotate away (0 → -90°), swap face, then rotate back (-90° → 0) from the front
       (async () => {
-        await controls.start({ rotateY: -90, transition: { duration: 0.22, ease: 'easeIn' } });
+        await controls.start({ rotateY: -90, transition: { duration: 0.36, ease: 'easeIn' } });
         setShowBack(false);
         controls.set({ rotateY: 90 });
-        await controls.start({ rotateY: 0, transition: { duration: 0.28, ease: 'easeOut' } });
+        await sleep(90);
+        await controls.start({ rotateY: 0, transition: { duration: 0.44, ease: 'easeOut' } });
       })();
     } else if (faceDown) {
       setShowBack(true);
@@ -722,6 +723,44 @@ function DealerChipRack() {
   );
 }
 
+function DealerCardAnim({ card, index, shoeOffset, faceDown }: {
+  card: Card;
+  index: number;
+  shoeOffset: number;
+  faceDown: boolean;
+}) {
+  // These values are captured when this card mounts. Later dealer cards cannot
+  // restart or recenter an animation that is already in flight.
+  const startX = useRef(shoeOffset).current;
+  const landingX = useRef(index * 29 - 15).current;
+  const delay = index < 2 ? index * 0.10 : 0;
+
+  return (
+    <motion.div
+      initial={{ x: startX, y: -8, opacity: 0, rotate: 10, scale: 0.7 }}
+      animate={{
+        x: [startX, startX * 0.72, startX * 0.34, landingX],
+        y: [-8, -18, -15, 0],
+        opacity: [0, 1, 1, 1],
+        rotate: [10, 6, -1.5, 0],
+        scale: [0.7, 0.9, 1.02, 1],
+      }}
+      transition={{
+        delay,
+        duration: 0.76,
+        times: [0, 0.16, 0.48, 1],
+        ease: [0.2, 0.74, 0.16, 1],
+        opacity: { duration: 0.14, delay },
+      }}
+      style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
+    >
+      {index === 1
+        ? <FlipCard card={card} faceDown={faceDown} />
+        : <PlayingCard card={card} />}
+    </motion.div>
+  );
+}
+
 function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement | null>; collectingCards?: boolean }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
@@ -757,7 +796,7 @@ function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: an
   // dealerX in container ≈ containerW * 0.50
   // → offset ≈ containerW * 0.50  (card starts ~50% of container width to the right)
   const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
-  const dealerShoeOffsetX = gw * 0.50;
+  const dealerShoeOffsetX = gw * 0.425;
 
   return (
     <div style={{
@@ -773,45 +812,15 @@ function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: an
       </div>
       <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', opacity: collectingCards ? 0 : 1, transition: 'opacity 180ms ease' }}>
         <AnimatePresence>
-          {dealerCards.map((card, i) => {
-            // Stagger ALL dealer cards so they appear to be dealt one at a time.
-            // Initial 2 cards: 0 ms and 400 ms.  Extra cards (DEALER_PLAY): 900 ms apart.
-            const extraDelay = i < 2 ? i * 0.40 : (i - 1) * 0.90;
-            return (
-              <motion.div
-                key={`dc-${i}`}
-                initial={{
-                  // Start at the shoe (right side, same height as dealer)
-                  x: dealerShoeOffsetX,
-                  y: -6,
-                  opacity: 0,
-                  rotate: 14,
-                  scale: 0.88,
-                }}
-                animate={{
-                  x: [dealerShoeOffsetX, dealerShoeOffsetX * 0.42, (i - (dealerCards.length - 1) / 2) * 29],
-                  y: [-6, -20, 0],
-                  opacity: 1,
-                  rotate: [14, -2, 0],
-                  scale: [0.72, 1.025, 1],
-                }}
-                transition={{
-                  delay: extraDelay,
-                  duration: 0.62,
-                  times: [0, 0.35, 1],
-                  ease: [0.22, 0, 0.18, 1],  // fast start, smooth deceleration into landing
-                  opacity: { duration: 0.18, delay: extraDelay },
-                }}
-                style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
-              >
-                {/* Hole card (index 1) uses FlipCard so it reveals with a squeeze animation */}
-                {i === 1
-                  ? <FlipCard card={card} faceDown={!revealed} />
-                  : <PlayingCard card={card} />
-                }
-              </motion.div>
-            );
-          })}
+          {dealerCards.map((card, i) => (
+            <DealerCardAnim
+              key={`dc-${i}`}
+              card={card}
+              index={i}
+              shoeOffset={dealerShoeOffsetX}
+              faceDown={!revealed}
+            />
+          ))}
         </AnimatePresence>
       </div>
       {val && (
@@ -1043,8 +1052,10 @@ function cardDealOrigin(
   const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
   const gh = gameAreaRef.current?.offsetHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 720);
 
-  const shoeX = gw * 1.00;                          // shoe centre ≈ right edge of container
-  const shoeY = gh * 0.035;                          // shoe top:3.5% of felt
+  // Match the visible mouth of the redesigned shoe. Starting inside the
+  // viewport keeps the full pull-from-shoe motion visible for player cards.
+  const shoeX = gw * 0.925;
+  const shoeY = gh * 0.075;
 
   const seatX = (seatXPct / 100 * 1.06 - 0.03) * gw;
   const seatY = (seatYPct / 100 * 0.99)         * gh;
@@ -1136,12 +1147,12 @@ function PlayerCardAnim({
         scale: [0.68, 1.025, 1],
       }}
       transition={{
-        duration: 0.58,
+        duration: 0.72,
         x:       { ease: [0.20, 0, 0.15, 1] },
         y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
         opacity: { duration: 0.10 },
-        rotate:  { ease: 'easeOut', duration: 0.58 },
-        scale:   { ease: 'easeOut', duration: 0.58 },
+        rotate:  { ease: 'easeOut', duration: 0.72 },
+        scale:   { ease: 'easeOut', duration: 0.72 },
       }}
       style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
     >
