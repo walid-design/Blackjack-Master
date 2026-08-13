@@ -23,6 +23,23 @@ function useIsMobile() {
   return mobile;
 }
 
+function useTableUiScale() {
+  const getScale = () => {
+    if (window.innerWidth < 1360 || window.innerHeight < 700) return 1;
+    const widthProgress = Math.min(1, (window.innerWidth - 1360) / 1040);
+    const heightProgress = Math.min(1, (window.innerHeight - 700) / 500);
+    return 1 + Math.min(widthProgress, heightProgress) * 0.34;
+  };
+
+  const [scale, setScale] = useState(getScale);
+  useEffect(() => {
+    const update = () => setScale(getScale());
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  return scale;
+}
+
 // Parabolic arc — tighter x-spread on mobile to prevent crowding
 function getSeatPositions(n: number, mobile = false): Array<{ x: number; y: number }> {
   return Array.from({ length: n }, (_, i) => {
@@ -66,6 +83,7 @@ export default function Table() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   const isMobile = useIsMobile();
+  const tableUiScale = useTableUiScale();
   const tableConfig = TABLES.find(t => t.id === id);
 
   const [playerName, setPlayerName] = useState('Player');
@@ -188,6 +206,7 @@ export default function Table() {
       const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [state.phase, (state as any).settled]);
 
   if (!tableConfig) { setLocation('/'); return null; }
@@ -204,6 +223,7 @@ export default function Table() {
       height: '100dvh', display: 'flex', flexDirection: 'column',
       background: '#0d1020', overflow: 'hidden',
       userSelect: 'none', fontFamily: "'Playfair Display', serif", color: '#f0e6c8',
+      ['--table-ui-scale' as string]: tableUiScale,
     }}>
 
       {/* ── HEADER ── */}
@@ -384,7 +404,8 @@ export default function Table() {
               position: 'absolute',
               top: '36%',
               left: '50%',
-              transform: 'translateX(-50%)',
+              transform: 'translateX(-50%) scale(var(--table-ui-scale, 1))',
+              transformOrigin: 'top center',
               zIndex: 40,
               pointerEvents: 'none',
             }}
@@ -515,6 +536,7 @@ export default function Table() {
               padding: '12px 14px',
               minWidth: 200,
               maxWidth: 240,
+              transformOrigin: 'top left',
               boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
             }}
           >
@@ -624,46 +646,69 @@ function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
 // Dealer Zone
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Decorative chip rack — sits above dealer cards, mimics real casino chip tray
+// Recessed casino-style dealer float tray.
 function DealerChipRack() {
   const cols = [
-    { bg: '#e8e8e8', shadow: '#aaa' },  // white
-    { bg: '#d03030', shadow: '#801818' }, // red
-    { bg: '#28a028', shadow: '#156015' }, // green
-    { bg: '#2040c0', shadow: '#102070' }, // blue
-    { bg: '#8030c0', shadow: '#4a1870' }, // purple
-    { bg: '#181818', shadow: '#000' },   // black
-    { bg: '#e8e8e8', shadow: '#aaa' },
-    { bg: '#d03030', shadow: '#801818' },
+    { face: '#f0eee8', edge: '#aaa89f', mark: '#c8c5bc' },
+    { face: '#c9202d', edge: '#6f0d17', mark: '#f6d8d8' },
+    { face: '#16884a', edge: '#07502a', mark: '#e4d5a6' },
+    { face: '#202b9d', edge: '#0b1052', mark: '#eee2b6' },
+    { face: '#6e258e', edge: '#351044', mark: '#e9d9ee' },
+    { face: '#24252a', edge: '#08090b', mark: '#d7b451' },
+    { face: '#a15a18', edge: '#542b08', mark: '#f2dfb0' },
   ];
-  const heights = [7, 6, 8, 5, 6, 7, 5, 6];
+  const heights = [7, 9, 8, 6, 7, 9, 5];
   return (
     <div style={{
-      display: 'flex', gap: 3, alignItems: 'flex-end',
-      background: 'linear-gradient(180deg, #3d1e08 0%, #261004 100%)',
-      border: '1px solid rgba(255,200,80,0.18)',
-      borderRadius: 5,
-      padding: '5px 7px 4px',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,220,100,0.1)',
+      position: 'relative', width: 226, height: 58,
+      padding: '8px 11px 10px',
+      display: 'flex', gap: 5, alignItems: 'stretch',
+      borderRadius: '8px 8px 13px 13px',
+      background: 'linear-gradient(180deg, #7c5a32 0%, #352313 11%, #171514 18%, #0b0c0d 72%, #302015 78%, #130c08 100%)',
+      border: '1px solid rgba(226,190,124,0.46)', borderBottom: '4px solid #120a05',
+      boxShadow: '0 9px 18px rgba(0,0,0,0.72), 0 2px 3px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,225,170,0.42), inset 0 -3px 7px rgba(0,0,0,0.8)',
     }}>
+      <div style={{
+        position: 'absolute', inset: '4px 7px auto', height: 2, borderRadius: 2,
+        background: 'linear-gradient(90deg, transparent, rgba(255,225,165,0.58), transparent)', opacity: 0.7,
+      }} />
       {cols.map((col, ci) => (
-        <div key={ci} style={{ display: 'flex', flexDirection: 'column-reverse', gap: 1 }}>
-          {Array.from({ length: heights[ci] }).map((_, ri) => (
-            <div key={ri} style={{
-              width: 16, height: 3.5,
-              background: `linear-gradient(90deg, ${col.shadow}, ${col.bg} 40%, ${col.bg} 60%, ${col.shadow})`,
-              borderRadius: 2,
-              boxShadow: `0 1px 1px rgba(0,0,0,0.6)`,
-              border: '0.5px solid rgba(0,0,0,0.3)',
-            }} />
-          ))}
+        <div key={ci} style={{
+          position: 'relative', flex: 1, minWidth: 0, overflow: 'hidden',
+          borderRadius: '4px 4px 8px 8px',
+          background: 'linear-gradient(90deg, #050607, #151618 48%, #050607)',
+          border: '1px solid rgba(255,255,255,0.075)',
+          boxShadow: 'inset 0 4px 8px rgba(0,0,0,0.95), inset 1px 0 0 rgba(255,255,255,0.04)',
+        }}>
+          <div style={{ position: 'absolute', left: 3, right: 3, bottom: 2, height: heights[ci] * 3.7 + 3 }}>
+            {Array.from({ length: heights[ci] }).map((_, ri) => (
+              <div key={ri} style={{
+                position: 'absolute', left: 0, right: 0, bottom: ri * 3.7,
+                height: 7, borderRadius: '50%',
+                background: `linear-gradient(90deg, ${col.edge} 0%, ${col.face} 18%, ${col.face} 82%, ${col.edge} 100%)`,
+                border: `1px solid ${col.edge}`,
+                boxShadow: '0 1px 1px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.35)',
+              }}>
+                <div style={{
+                  position: 'absolute', left: '16%', right: '16%', top: 1, height: 1, borderRadius: 1,
+                  background: `repeating-linear-gradient(90deg, ${col.mark} 0 4px, transparent 4px 8px)`, opacity: 0.9,
+                }} />
+              </div>
+            ))}
+          </div>
         </div>
       ))}
+      <div style={{
+        position: 'absolute', left: '50%', bottom: -7, transform: 'translateX(-50%)',
+        width: 64, height: 8, borderRadius: '0 0 7px 7px',
+        background: 'linear-gradient(180deg,#27160c,#0b0603)',
+        border: '1px solid rgba(205,161,90,0.18)', borderTop: 0,
+      }} />
     </div>
   );
 }
 
-function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement> }) {
+function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement | null> }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
 
@@ -702,7 +747,8 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
 
   return (
     <div style={{
-      position: 'absolute', top: '1%', left: '50%', transform: 'translateX(-50%)',
+      position: 'absolute', top: '1%', left: '50%', transform: 'translateX(-50%) scale(var(--table-ui-scale, 1))',
+      transformOrigin: 'top center',
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       zIndex: 5,
     }}>
@@ -797,7 +843,7 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
   const cw = isMobile ? 32 : 46;
   const ch = isMobile ? 44 : 64;
   return (
-    <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, zIndex: 5 }}>
+    <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, zIndex: 5, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))', transformOrigin: 'top right' }}>
       <div style={{ position: 'relative', width: w, height: h }}>
         {Array.from({ length: visible }).map((_, i) => (
           <div key={i} style={{
@@ -852,7 +898,7 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
 function cardDealOrigin(
   seatXPct: number,
   seatYPct: number,
-  gameAreaRef: React.RefObject<HTMLDivElement>,
+  gameAreaRef: React.RefObject<HTMLDivElement | null>,
 ): { x: number; y: number } {
   const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
   const gh = gameAreaRef.current?.offsetHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 720);
@@ -968,7 +1014,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
   seatXPct: number; seatYPct?: number; isMobile?: boolean;
-  gameAreaRef: React.RefObject<HTMLDivElement>;
+  gameAreaRef: React.RefObject<HTMLDivElement | null>;
 }) {
   // Circle radius scales down on mobile — extra step for 7-seat tables
   const R = isMobile
@@ -1007,7 +1053,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
     if (!isBettingPhase) return null;
     // Sit button is itself anchored at the arc point via translate(-50%,-50%)
     return (
-      <div style={{ position: 'relative', width: 0, height: 0 }}>
+      <div style={{ position: 'relative', width: 0, height: 0, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))' }}>
         <motion.button
           data-testid={`button-sit-${seatIndex}`}
           onClick={() => {
@@ -1052,7 +1098,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
     (seatXPct >= 33 && seatXPct <= 67) ? '-50%' : 0;
 
   return (
-    <div style={{ position: 'relative', width: 0, height: 0 }}>
+    <div style={{ position: 'relative', width: 0, height: 0, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))' }}>
 
       {/* ── CARDS ZONE (above bet circle) ── */}
       <div style={{
