@@ -338,83 +338,119 @@ export default function Table() {
             </div>
           ))}
 
-          {/* ── FLOATING BET CONTROLS — centered bottom of felt, desktop only ── */}
-          {!isMobile && state.phase === 'BETTING' && anyActive && (
+          {/* ── FELT BETTING UI — chip arc + circular action buttons ── */}
+          {state.phase === 'BETTING' && anyActive && (
             <AnimatePresence>
               <motion.div
-                key="floating-bet-hud"
-                initial={{ opacity: 0, y: 12 }}
+                key="felt-betting-ui"
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: 0.25 }}
                 style={{
                   position: 'absolute',
-                  bottom: 18,
+                  top: '50%',
                   left: '50%',
-                  transform: 'translateX(-50%)',
+                  transform: 'translate(-50%, -50%)',
                   zIndex: 40,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 14,
                   pointerEvents: 'all',
                 }}
               >
-                <div style={{
-                  background: 'rgba(8,10,24,0.82)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: '1px solid rgba(240,184,48,0.22)',
-                  borderRadius: 12,
-                  padding: '10px 18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  boxShadow: '0 6px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
-                }}>
+                {/* ── Curved chip row ── */}
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: isMobile ? 4 : 8 }}>
+                  {CHIP_AMOUNTS.map((amount, i) => {
+                    const mid = (CHIP_AMOUNTS.length - 1) / 2;
+                    const dist = Math.abs(i - mid);
+                    // Arc: center chip sits highest, edges dip down
+                    const arcDip = dist * dist * 5;
+                    const sz = isMobile ? 42 : 52;
+                    return (
+                      <motion.div
+                        key={amount}
+                        data-testid={`chip-felt-${amount}`}
+                        style={{ marginBottom: arcDip, cursor: 'pointer' }}
+                        whileHover={{ scale: 1.18, y: -6 }}
+                        whileTap={{ scale: 0.88 }}
+                        onClick={() => {
+                          const targetSeat = (state.bettingSeatId >= 0)
+                            ? state.bettingSeatId
+                            : (state.seats as any[]).findIndex((s: any) => s.isActive);
+                          if (targetSeat >= 0) {
+                            if (state.bettingSeatId !== targetSeat) dispatch({ type: 'SELECT_BET_SEAT', seatId: targetSeat });
+                            dispatch({ type: 'PLACE_BET', seatId: targetSeat, amount });
+                            setSelectedChip(amount);
+                          }
+                        }}
+                      >
+                        <Chip amount={amount} size={sz} />
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                {/* ── Circular action buttons ── */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  {/* Repeat */}
                   {state.lastBets && Object.keys(state.lastBets.main).length > 0 && (
-                    <button
-                      data-testid="button-repeat-bet"
-                      onClick={() => dispatch({ type: 'REPEAT_BET' })}
-                      style={{
-                        padding: '6px 16px', fontSize: 10, fontWeight: 700,
-                        letterSpacing: '0.14em', textTransform: 'uppercase',
-                        fontFamily: 'Inter, sans-serif',
-                        color: 'rgba(240,184,48,0.85)',
-                        background: 'rgba(240,184,48,0.08)',
-                        border: '1px solid rgba(240,184,48,0.3)',
-                        borderRadius: 6, cursor: 'pointer',
-                      }}
-                    >↻ Repeat</button>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <motion.button
+                        data-testid="button-repeat-bet"
+                        whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                        onClick={() => dispatch({ type: 'REPEAT_BET' })}
+                        style={{
+                          width: 42, height: 42, borderRadius: '50%',
+                          background: 'rgba(240,184,48,0.12)',
+                          border: '1.5px solid rgba(240,184,48,0.45)',
+                          color: '#f0b830',
+                          fontSize: 18, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+                        }}
+                      >↻</motion.button>
+                      <span style={{ fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.55)', fontFamily: 'sans-serif' }}>Repeat</span>
+                    </div>
                   )}
-                  <button
-                    data-testid="button-clear-bets"
-                    onClick={() => dispatch({ type: 'CLEAR_BETS' })}
-                    style={{
-                      padding: '6px 16px', fontSize: 10, fontWeight: 700,
-                      letterSpacing: '0.14em', textTransform: 'uppercase',
-                      fontFamily: 'Inter, sans-serif',
-                      color: 'rgba(255,255,255,0.45)',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: 6, cursor: 'pointer',
-                    }}
-                  >Clear</button>
+
+                  {/* Deal — gold pill, center-prominent */}
                   {canDeal && (
-                    <button
+                    <motion.button
                       data-testid="button-deal"
+                      whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                       onClick={() => dispatch({ type: 'DEAL' })}
                       style={{
-                        padding: '7px 28px', fontSize: 11, fontWeight: 800,
-                        letterSpacing: '0.22em', textTransform: 'uppercase',
-                        fontFamily: 'Inter, sans-serif',
+                        padding: '9px 32px', fontSize: 11, fontWeight: 800,
+                        letterSpacing: '0.24em', textTransform: 'uppercase',
+                        fontFamily: 'sans-serif',
                         background: 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)',
-                        border: 'none', borderRadius: 6, color: '#000',
+                        border: 'none', borderRadius: 24, color: '#000',
                         cursor: 'pointer',
-                        boxShadow: '0 2px 16px rgba(212,168,32,0.45)',
+                        boxShadow: '0 3px 20px rgba(212,168,32,0.55), 0 1px 4px rgba(0,0,0,0.5)',
                       }}
-                    >Deal</button>
+                    >Deal</motion.button>
                   )}
+
+                  {/* Clear */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <motion.button
+                      data-testid="button-clear-bets"
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                      onClick={() => dispatch({ type: 'CLEAR_BETS' })}
+                      style={{
+                        width: 42, height: 42, borderRadius: '50%',
+                        background: 'rgba(255,255,255,0.07)',
+                        border: '1.5px solid rgba(255,255,255,0.2)',
+                        color: 'rgba(255,255,255,0.55)',
+                        fontSize: 16, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
+                      }}
+                    >✕</motion.button>
+                    <span style={{ fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', fontFamily: 'sans-serif' }}>Clear</span>
+                  </div>
                 </div>
               </motion.div>
             </AnimatePresence>
@@ -1511,28 +1547,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
           </div>
         </div>
 
-        {/* Row 2: chip tray (full width) */}
-        {isBettingPhase && anyActive && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
-            {CHIP_AMOUNTS.map(amount => (
-              <div
-                key={amount}
-                data-testid={`chip-${amount}`}
-                role="button" tabIndex={0}
-                onClick={() => setSelectedChip(amount)}
-                onKeyDown={e => e.key === 'Enter' && setSelectedChip(amount)}
-                style={{
-                  cursor: 'pointer', border: 'none', background: 'none',
-                  transform: selectedChip === amount ? 'translateY(-6px) scale(1.12)' : 'scale(0.95)',
-                  transition: 'transform 0.15s',
-                  filter: selectedChip === amount ? 'drop-shadow(0 3px 10px rgba(255,255,255,0.3))' : 'none',
-                }}
-              >
-                <Chip amount={amount} size={selectedChip === amount ? chipSelected : chipSize} />
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Chips now live on the felt (FeltBettingUI) — no tray needed here */}
       </div>
     );
   }
@@ -1557,29 +1572,8 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
         />
       </div>
 
-      {/* Center: chip tray + deal */}
+      {/* Center: phase status */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        {isBettingPhase && anyActive && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5 }}>
-            {CHIP_AMOUNTS.map(amount => (
-              <div
-                key={amount}
-                data-testid={`chip-${amount}`}
-                role="button" tabIndex={0}
-                onClick={() => setSelectedChip(amount)}
-                onKeyDown={e => e.key === 'Enter' && setSelectedChip(amount)}
-                style={{
-                  cursor: 'pointer', padding: 0, border: 'none', background: 'none',
-                  transform: selectedChip === amount ? 'translateY(-7px) scale(1.14)' : 'scale(0.95)',
-                  transition: 'transform 0.15s',
-                  filter: selectedChip === amount ? 'drop-shadow(0 4px 12px rgba(255,255,255,0.3))' : 'none',
-                }}
-              >
-                <Chip amount={amount} size={selectedChip === amount ? chipSelected : chipSize} />
-              </div>
-            ))}
-          </div>
-        )}
         {state.phase === 'SETTLEMENT' && (state as any).settled && (
           <motion.button
             data-testid="button-next-round"
@@ -1587,22 +1581,13 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             style={{ ...ghostBtn, color: 'rgba(240,184,48,0.7)', borderColor: 'rgba(240,184,48,0.25)' }}
           >Deal Now ▶</motion.button>
         )}
-        {state.phase === 'BETTING'     && anyActive && <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.35)', fontFamily: 'sans-serif' }}>Place your bets</div>}
         {state.phase === 'DEALING'     && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>}
         {state.phase === 'INSURANCE'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>}
         {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealer's turn…</div>}
       </div>
 
-      {/* Selected chip reminder */}
-      <div style={{ minWidth: 90, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        {isBettingPhase && anyActive && (
-          <>
-            <div style={{ fontSize: 8, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)', fontFamily: 'sans-serif' }}>Selected</div>
-            <Chip amount={selectedChip} size={44} />
-            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: 'sans-serif' }}>Click seat to bet</div>
-          </>
-        )}
-      </div>
+      {/* Right spacer — keeps bankroll left-anchored */}
+      <div style={{ minWidth: 90, flexShrink: 0 }} />
     </div>
   );
 }

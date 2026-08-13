@@ -1,0 +1,2 @@
+- [Blackjack felt chip arc](blackjack-felt-chip-arc.md) — chips live on the felt (not ControlBar); clicking directly dispatches PLACE_BET to bettingSeatId.
+- [Blackjack timing constants](blackjack-timing.md) — dealer timing values and settlement delay formula.
