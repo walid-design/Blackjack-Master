@@ -114,6 +114,7 @@ export default function Table() {
   // Lifted chip selection – needed by ControlBar (display) and SeatSpot (bet placement)
   const [selectedChip, setSelectedChip] = useState(25);
   const [showPayouts, setShowPayouts] = useState(false);
+  const [collectingCards, setCollectingCards] = useState(false);
 
   // Track previous bankroll for delta animation
   const prevBankrollRef = useRef(state.bankroll);
@@ -186,12 +187,12 @@ export default function Table() {
     return () => clearTimeout(t);
   }, [state.phase]);
 
-  // Auto-advance to next round 3.5 s after settlement results are revealed —
-  // live-casino feel; player can also click "Deal Now" to skip the wait.
+  // Sweep the cards to the discard tray, then open the next round.
   useEffect(() => {
-    if (!(state as any).settled) return;
-    const t = setTimeout(() => dispatch({ type: 'NEXT_ROUND' }), 3500);
-    return () => clearTimeout(t);
+    if (!(state as any).settled) { setCollectingCards(false); return; }
+    const collectTimer = setTimeout(() => setCollectingCards(true), 2400);
+    const roundTimer = setTimeout(() => dispatch({ type: 'NEXT_ROUND' }), 3900);
+    return () => { clearTimeout(collectTimer); clearTimeout(roundTimer); };
   }, [(state as any).settled]);
 
   // Trigger settlement — delay grows with dealer card count so all stagger
@@ -342,7 +343,7 @@ export default function Table() {
           </div>
 
           {/* Dealer zone */}
-          <DealerZone state={state} gameAreaRef={gameAreaRef} />
+          <DealerZone state={state} gameAreaRef={gameAreaRef} collectingCards={collectingCards} />
 
           {/* Card shoe */}
           <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
@@ -368,9 +369,16 @@ export default function Table() {
                 seatYPct={y}
                 isMobile={isMobile}
                 gameAreaRef={gameAreaRef}
+                collectingCards={collectingCards}
               />
             </div>
           ))}
+
+          <CardCollectionAnimation
+            state={state}
+            seatPositions={seatPositions}
+            active={collectingCards}
+          />
 
           {/* oval rings removed — they doubled up with the SIT dashed circles */}
 
@@ -659,16 +667,19 @@ function DealerChipRack() {
     { face: '#6e258e', edge: '#351044', mark: '#e9d9ee' },
     { face: '#24252a', edge: '#08090b', mark: '#d7b451' },
     { face: '#a15a18', edge: '#542b08', mark: '#f2dfb0' },
+    { face: '#16884a', edge: '#07502a', mark: '#e4d5a6' },
+    { face: '#c9202d', edge: '#6f0d17', mark: '#f6d8d8' },
+    { face: '#f0eee8', edge: '#aaa89f', mark: '#c8c5bc' },
   ];
-  const heights = [7, 9, 8, 6, 7, 9, 5];
+  const heights = [7, 9, 8, 6, 7, 9, 5, 8, 7, 9];
   return (
     <div style={{
-      position: 'relative', width: 226, height: 58,
-      padding: '8px 11px 10px',
-      display: 'flex', gap: 5, alignItems: 'stretch',
-      borderRadius: '8px 8px 13px 13px',
-      background: 'linear-gradient(180deg, #7c5a32 0%, #352313 11%, #171514 18%, #0b0c0d 72%, #302015 78%, #130c08 100%)',
-      border: '1px solid rgba(226,190,124,0.46)', borderBottom: '4px solid #120a05',
+      position: 'relative', width: 342, height: 50,
+      padding: '7px 10px 8px',
+      display: 'flex', gap: 4, alignItems: 'stretch',
+      borderRadius: '4px 4px 8px 8px',
+      background: 'linear-gradient(180deg, #8e6538 0%, #432a16 12%, #171514 20%, #0b0c0d 74%, #3b2413 82%, #130c08 100%)',
+      border: '1px solid rgba(226,190,124,0.54)', borderBottom: '4px solid #120a05',
       boxShadow: '0 9px 18px rgba(0,0,0,0.72), 0 2px 3px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,225,170,0.42), inset 0 -3px 7px rgba(0,0,0,0.8)',
     }}>
       <div style={{
@@ -711,7 +722,7 @@ function DealerChipRack() {
   );
 }
 
-function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement | null> }) {
+function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement | null>; collectingCards?: boolean }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
 
@@ -760,7 +771,7 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
       <div style={{ fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.2)', fontFamily: 'sans-serif' }}>
         Dealer
       </div>
-      <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+      <div style={{ position: 'relative', minWidth: 80, height: 96, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', opacity: collectingCards ? 0 : 1, transition: 'opacity 180ms ease' }}>
         <AnimatePresence>
           {dealerCards.map((card, i) => {
             // Stagger ALL dealer cards so they appear to be dealt one at a time.
@@ -778,19 +789,20 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
                   scale: 0.88,
                 }}
                 animate={{
-                  x: (i - (dealerCards.length - 1) / 2) * 26,
-                  y: 0,
+                  x: [dealerShoeOffsetX, dealerShoeOffsetX * 0.42, (i - (dealerCards.length - 1) / 2) * 29],
+                  y: [-6, -20, 0],
                   opacity: 1,
-                  rotate: 0,
-                  scale: 1,
+                  rotate: [14, -2, 0],
+                  scale: [0.72, 1.025, 1],
                 }}
                 transition={{
                   delay: extraDelay,
-                  duration: 0.55,
+                  duration: 0.62,
+                  times: [0, 0.35, 1],
                   ease: [0.22, 0, 0.18, 1],  // fast start, smooth deceleration into landing
                   opacity: { duration: 0.18, delay: extraDelay },
                 }}
-                style={{ position: 'absolute', top: 0 }}
+                style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
               >
                 {/* Hole card (index 1) uses FlipCard so it reveals with a squeeze animation */}
                 {i === 1
@@ -838,19 +850,74 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
 // Card Shoe
 // ─────────────────────────────────────────────────────────────────────────────
 
+function CardCollectionAnimation({ state, seatPositions, active }: {
+  state: any;
+  seatPositions: Array<{ x: number; y: number }>;
+  active: boolean;
+}) {
+  const cards = useMemo(() => {
+    const items: Array<{ key: string; x: number; y: number; offset: number }> = [];
+    (state.dealerCards as Card[]).forEach((_, i) => items.push({ key: `dealer-${i}`, x: 50 + i * 1.2, y: 18, offset: i }));
+    (state.seats as Seat[]).forEach((seat, seatIndex) => {
+      const pos = seatPositions[seatIndex];
+      seat.hands.forEach((hand, handIndex) => hand.cards.forEach((_, cardIndex) => {
+        items.push({
+          key: `seat-${seatIndex}-${handIndex}-${cardIndex}`,
+          x: pos.x + cardIndex * 0.9,
+          y: pos.y - 15,
+          offset: items.length,
+        });
+      }));
+    });
+    return items;
+  }, [state.dealerCards, state.seats, seatPositions]);
+
+  return (
+    <AnimatePresence>
+      {active && cards.map((item, i) => (
+        <motion.div
+          key={item.key}
+          initial={{ left: `${item.x}%`, top: `${item.y}%`, opacity: 0.96, rotate: (i % 5 - 2) * 3, scale: 1 }}
+          animate={{
+            left: ['' + item.x + '%', `${Math.max(12, item.x - 18)}%`, '4.8%'],
+            top: ['' + item.y + '%', `${Math.max(10, item.y - 12)}%`, '7%'],
+            opacity: [0.96, 1, 0.92],
+            rotate: [(i % 5 - 2) * 3, -9, -4],
+            scale: [1, 0.9, 0.54],
+          }}
+          transition={{
+            delay: i * 0.055,
+            duration: 0.78,
+            times: [0, 0.34, 1],
+            ease: [0.22, 0.72, 0.18, 1],
+          }}
+          style={{ position: 'absolute', width: 48, height: 68, zIndex: 90, pointerEvents: 'none', transformOrigin: 'center' }}
+        >
+          <div style={{
+            width: '100%', height: '100%', borderRadius: 5,
+            background: 'repeating-linear-gradient(45deg,#71141b 0 4px,#a5232c 4px 8px,#e6d9b6 8px 9px)',
+            border: '2px solid #eee5cd',
+            boxShadow: '0 10px 18px rgba(0,0,0,0.48), inset 0 0 0 2px rgba(70,8,12,0.55)',
+          }} />
+        </motion.div>
+      ))}
+    </AnimatePresence>
+  );
+}
+
 function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: number; isMobile?: boolean }) {
   const total = decks * 52;
   const fill = shoe.length / total;
-  const cardW = isMobile ? 37 : 58;
-  const cardH = isMobile ? 52 : 82;
-  const housingW = isMobile ? 56 : 88;
-  const housingH = isMobile ? 64 : 99;
+  const cardW = isMobile ? 50 : 92;
+  const cardH = isMobile ? 38 : 58;
+  const housingW = isMobile ? 72 : 128;
+  const housingH = isMobile ? 58 : 84;
   return (
     <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 5, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))', transformOrigin: 'top right' }}>
       <div style={{ position: 'relative', width: housingW, height: housingH }}>
         {/* Visible deck inside the transparent shoe */}
         <div style={{
-          position: 'absolute', right: 9, bottom: 12,
+          position: 'absolute', right: 9, top: 8,
           width: cardW, height: Math.max(10, cardH * fill),
           borderRadius: '4px 4px 2px 2px', overflow: 'hidden',
           background: 'repeating-linear-gradient(0deg,#f4f0e7 0 1px,#9d9a92 1px 2px)',
@@ -858,7 +925,7 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
           boxShadow: '-3px 3px 8px rgba(0,0,0,0.7)',
         }}>
           <div style={{
-            position: 'absolute', inset: '2px 2px auto', height: Math.min(cardH - 4, Math.max(8, cardH * fill - 4)),
+            position: 'absolute', inset: 2,
             borderRadius: 3,
             background: 'repeating-linear-gradient(45deg,#71141b 0 3px,#9e2028 3px 6px,#e6d9b6 6px 7px)',
             border: '1px solid rgba(255,245,220,0.55)',
@@ -869,20 +936,20 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
         {/* Smoked acrylic shoe housing */}
         <div style={{
           position: 'absolute', inset: 0,
-          clipPath: 'polygon(18% 0,100% 12%,100% 79%,82% 100%,0 100%,0 24%)',
-          background: 'linear-gradient(125deg,rgba(70,76,82,0.82),rgba(13,16,18,0.94) 43%,rgba(2,3,4,0.98))',
+          clipPath: 'polygon(15% 0,100% 10%,100% 78%,82% 100%,0 100%,0 30%)',
+          background: 'linear-gradient(125deg,rgba(160,170,176,0.12),rgba(28,32,35,0.18) 46%,rgba(2,3,4,0.35))',
           border: '1px solid rgba(210,220,225,0.28)',
           boxShadow: '0 8px 15px rgba(0,0,0,0.68), inset 2px 2px 2px rgba(255,255,255,0.12)',
           pointerEvents: 'none',
         }} />
         <div style={{
-          position: 'absolute', left: 7, right: 5, bottom: 5, height: 18,
+          position: 'absolute', left: 5, right: 4, bottom: 4, height: 24,
           borderRadius: '3px 3px 7px 7px',
           background: 'linear-gradient(180deg,#262b2e,#060708 75%)',
           border: '1px solid rgba(255,255,255,0.11)',
           boxShadow: '0 4px 6px rgba(0,0,0,0.7), inset 0 2px 4px rgba(0,0,0,0.9)',
         }}>
-          <div style={{ width: '58%', height: 4, margin: '5px auto 0', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
+          <div style={{ width: '42%', height: 6, margin: '6px 8px 0 auto', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
         </div>
         <div style={{ position: 'absolute', top: 8, left: 18, width: 2, height: '58%', transform: 'rotate(8deg)', background: 'rgba(255,255,255,0.15)', filter: 'blur(.2px)' }} />
       </div>
@@ -1060,34 +1127,35 @@ function PlayerCardAnim({
 
   return (
     <motion.div
-      initial={{ x: ix, y: iy, opacity: 0, rotate: -20, scale: 0.82 }}
+      initial={{ x: ix, y: iy, opacity: 0, rotate: -11, scale: 0.68 }}
       animate={{
         x: cIdx * 18,
         y: [iy, arcApex, 0],
         opacity: [0, 1, 1],
-        rotate: 0,
-        scale: 1,
+        rotate: [-11, 2, 0],
+        scale: [0.68, 1.025, 1],
       }}
       transition={{
-        duration: 0.46,
+        duration: 0.58,
         x:       { ease: [0.20, 0, 0.15, 1] },
         y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
         opacity: { duration: 0.10 },
-        rotate:  { ease: 'easeOut', duration: 0.46 },
-        scale:   { ease: 'easeOut', duration: 0.46 },
+        rotate:  { ease: 'easeOut', duration: 0.58 },
+        scale:   { ease: 'easeOut', duration: 0.58 },
       }}
-      style={{ position: 'absolute', top: 0 }}
+      style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
     >
       <PlayingCard card={card} />
     </motion.div>
   );
 }
 
-function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef }: {
+function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef, collectingCards = false }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
   seatXPct: number; seatYPct?: number; isMobile?: boolean;
   gameAreaRef: React.RefObject<HTMLDivElement | null>;
+  collectingCards?: boolean;
 }) {
   // Circle radius scales down on mobile — extra step for 7-seat tables
   const R = isMobile
@@ -1180,6 +1248,8 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         left: '50%', transform: 'translateX(-50%)',
         display: 'flex', gap: 6, alignItems: 'flex-end',
         pointerEvents: 'none',
+        opacity: collectingCards ? 0 : 1,
+        transition: 'opacity 180ms ease',
       }}>
         {seat.hands.map((hand: Hand, hIdx: number) => {
           const isThisHand = isPlayerTurn && seat.activeHandIndex === hIdx;
