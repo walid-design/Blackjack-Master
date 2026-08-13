@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft } from 'lucide-react';
 import { PlayingCard } from '@/components/PlayingCard';
 import { Chip, ChipStack, SideBetChip, BankrollStack, ChipBurst } from '@/components/Chip';
+import { createPortal } from 'react-dom';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -158,7 +159,7 @@ export default function Table() {
           await sleep(720);
         }
         dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-        await sleep(700);
+        await sleep(950);
         dispatch({ type: 'CHECK_DEALER_BJ' });
       })();
     } else {
@@ -343,7 +344,7 @@ export default function Table() {
           </div>
 
           {/* Dealer zone */}
-          <DealerZone state={state} gameAreaRef={gameAreaRef} collectingCards={collectingCards} />
+          <DealerZone state={state} collectingCards={collectingCards} />
 
           {/* Card shoe */}
           <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
@@ -368,7 +369,6 @@ export default function Table() {
                 seatXPct={x}
                 seatYPct={y}
                 isMobile={isMobile}
-                gameAreaRef={gameAreaRef}
                 collectingCards={collectingCards}
               />
             </div>
@@ -654,6 +654,66 @@ function FlipCard({ card, faceDown }: { card: Card; faceDown: boolean }) {
   );
 }
 
+function GlobalCardFlight({ card, targetRef, faceDown = false, onLanded }: {
+  card: Card;
+  targetRef: React.RefObject<HTMLDivElement | null>;
+  faceDown?: boolean;
+  onLanded: () => void;
+}) {
+  const [path, setPath] = useState<null | {
+    sx: number; sy: number; mx: number; my: number; ex: number; ey: number; endScale: number;
+  }>(null);
+
+  useEffect(() => {
+    const shoe = document.getElementById('card-shoe-mouth');
+    const target = targetRef.current;
+    if (!shoe || !target) {
+      onLanded();
+      return;
+    }
+
+    const start = shoe.getBoundingClientRect();
+    const end = target.getBoundingClientRect();
+    const sx = start.left + start.width * 0.35 - 34;
+    const sy = start.top + start.height * 0.5 - 48;
+    const ex = end.left;
+    const ey = end.top;
+    setPath({
+      sx, sy, ex, ey,
+      mx: sx + (ex - sx) * 0.48,
+      my: Math.min(sy, ey) - Math.max(18, Math.abs(ey - sy) * 0.12),
+      endScale: Math.max(0.75, end.width / 68),
+    });
+
+    const timer = window.setTimeout(onLanded, 820);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (!path) return null;
+
+  return createPortal(
+    <motion.div
+      initial={{ x: path.sx, y: path.sy, opacity: 0, rotate: 7, scale: 0.72 }}
+      animate={{
+        x: [path.sx, path.sx - 12, path.mx, path.ex],
+        y: [path.sy, path.sy - 3, path.my, path.ey],
+        opacity: [0, 1, 1, 1],
+        rotate: [7, 5, -1, 0],
+        scale: [0.72, 0.82, path.endScale * 1.015, path.endScale],
+      }}
+      transition={{ duration: 0.82, times: [0, 0.1, 0.48, 1], ease: [0.18, 0.72, 0.16, 1] }}
+      style={{
+        position: 'fixed', left: 0, top: 0, width: 68, height: 96,
+        zIndex: 9999, pointerEvents: 'none', transformOrigin: 'top left',
+        filter: 'drop-shadow(0 12px 10px rgba(0,0,0,0.38))',
+      }}
+    >
+      <PlayingCard card={card} faceDown={faceDown} />
+    </motion.div>,
+    document.body,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Dealer Zone
 // ─────────────────────────────────────────────────────────────────────────────
@@ -723,45 +783,30 @@ function DealerChipRack() {
   );
 }
 
-function DealerCardAnim({ card, index, shoeOffset, faceDown }: {
+function DealerCardAnim({ card, index, faceDown }: {
   card: Card;
   index: number;
-  shoeOffset: number;
   faceDown: boolean;
 }) {
-  // These values are captured when this card mounts. Later dealer cards cannot
-  // restart or recenter an animation that is already in flight.
-  const startX = useRef(shoeOffset).current;
+  const targetRef = useRef<HTMLDivElement>(null);
+  const [landed, setLanded] = useState(false);
   const landingX = useRef(index * 29 - 15).current;
-  const delay = index < 2 ? index * 0.10 : 0;
 
   return (
-    <motion.div
-      initial={{ x: startX, y: -8, opacity: 0, rotate: 10, scale: 0.7 }}
-      animate={{
-        x: [startX, startX * 0.72, startX * 0.34, landingX],
-        y: [-8, -18, -15, 0],
-        opacity: [0, 1, 1, 1],
-        rotate: [10, 6, -1.5, 0],
-        scale: [0.7, 0.9, 1.02, 1],
-      }}
-      transition={{
-        delay,
-        duration: 0.76,
-        times: [0, 0.16, 0.48, 1],
-        ease: [0.2, 0.74, 0.16, 1],
-        opacity: { duration: 0.14, delay },
-      }}
-      style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
-    >
-      {index === 1
-        ? <FlipCard card={card} faceDown={faceDown} />
-        : <PlayingCard card={card} />}
-    </motion.div>
+    <div ref={targetRef} style={{ position: 'absolute', top: 0, left: landingX, width: 68, height: 96 }}>
+      <div style={{ opacity: landed ? 1 : 0 }}>
+        {index === 1
+          ? <FlipCard card={card} faceDown={faceDown} />
+          : <PlayingCard card={card} />}
+      </div>
+      {!landed && (
+        <GlobalCardFlight card={card} targetRef={targetRef} faceDown={faceDown} onLanded={() => setLanded(true)} />
+      )}
+    </div>
   );
 }
 
-function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: any; gameAreaRef: React.RefObject<HTMLDivElement | null>; collectingCards?: boolean }) {
+function DealerZone({ state, collectingCards = false }: { state: any; collectingCards?: boolean }) {
   const dealerCards: Card[] = state.dealerCards || [];
   const revealed = ['DEALER_TURN', 'SETTLEMENT'].includes(state.phase) || state.dealerStatus === 'blackjack';
 
@@ -795,9 +840,6 @@ function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: an
   // shoeX in container ≈ containerW * (0.97 * 1.06 − 0.03) ≈ containerW * 1.0
   // dealerX in container ≈ containerW * 0.50
   // → offset ≈ containerW * 0.50  (card starts ~50% of container width to the right)
-  const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
-  const dealerShoeOffsetX = gw * 0.425;
-
   return (
     <div style={{
       position: 'absolute', top: '1%', left: '50%', transform: 'translateX(-50%) scale(var(--table-ui-scale, 1))',
@@ -817,7 +859,6 @@ function DealerZone({ state, gameAreaRef, collectingCards = false }: { state: an
               key={`dc-${i}`}
               card={card}
               index={i}
-              shoeOffset={dealerShoeOffsetX}
               faceDown={!revealed}
             />
           ))}
@@ -958,7 +999,7 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
           border: '1px solid rgba(255,255,255,0.11)',
           boxShadow: '0 4px 6px rgba(0,0,0,0.7), inset 0 2px 4px rgba(0,0,0,0.9)',
         }}>
-          <div style={{ width: '42%', height: 6, margin: '6px 8px 0 auto', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
+          <div id="card-shoe-mouth" style={{ width: '42%', height: 6, margin: '6px 8px 0 auto', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
         </div>
         <div style={{ position: 'absolute', top: 8, left: 18, width: 2, height: '58%', transform: 'rotate(8deg)', background: 'rgba(255,255,255,0.15)', filter: 'blur(.2px)' }} />
       </div>
@@ -1028,41 +1069,6 @@ function DiscardTray({ discard, decks, isMobile = false }: { discard: Card[]; de
 // content exists above (cards) or below (action buttons / side bets).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Compute the card's initial position offset (shoe → seat) for the deal animation.
- * All values are in pixels, relative to the seat's arc anchor point.
- *
- * Coordinate maths:
- *   Felt is positioned left:−3%, right:−3% of the game-area container → 106% wide.
- *   Shoe is at right:3% of felt ≈ left:97% of felt.
- *   shoeX_in_container  ≈ (0.97 × 1.06 − 0.03) × gw  ≈  gw × 1.0
- *   seatX_in_container  = (seatXPct/100 × 1.06 − 0.03) × gw
- *   → offset.x = shoeX − seatX   (always positive; leftmost seats travel furthest)
- *
- *   Felt is bottom:1% of game-area → height ≈ gh × 0.99.
- *   Shoe is at top:3.5% of felt  → shoeY ≈ gh × 0.035.
- *   seatY_in_container = seatYPct/100 × gh × 0.99
- *   → offset.y = shoeY − seatY   (always negative; shoe is above every seat)
- */
-function cardDealOrigin(
-  seatXPct: number,
-  seatYPct: number,
-  gameAreaRef: React.RefObject<HTMLDivElement | null>,
-): { x: number; y: number } {
-  const gw = gameAreaRef.current?.offsetWidth  ?? (typeof window !== 'undefined' ? window.innerWidth  : 1280);
-  const gh = gameAreaRef.current?.offsetHeight ?? (typeof window !== 'undefined' ? window.innerHeight : 720);
-
-  // Match the visible mouth of the redesigned shoe. Starting inside the
-  // viewport keeps the full pull-from-shoe motion visible for player cards.
-  const shoeX = gw * 0.925;
-  const shoeY = gh * 0.075;
-
-  const seatX = (seatXPct / 100 * 1.06 - 0.03) * gw;
-  const seatY = (seatYPct / 100 * 0.99)         * gh;
-
-  return { x: shoeX - seatX, y: shoeY - seatY };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BonusPaidToast — self-dismissing toast that appears when an immediate side-bet
 // win is paid, then fades out after 2.5 s. Uses AnimatePresence for the exit.
@@ -1129,43 +1135,23 @@ function BonusPaidToast({
 // animation → cards flash back to the shoe position.
 // ─────────────────────────────────────────────────────────────────────────────
 function PlayerCardAnim({
-  card, cIdx, origin,
-}: { card: Card; cIdx: number; origin: { x: number; y: number } }) {
-  // Freeze origin at mount time — never update.
-  const ix       = useRef(origin.x - cIdx * 18).current;
-  const iy       = useRef(origin.y).current;
-  const arcApex  = iy * 1.12;   // 12% higher than the shoe height for the arc
+  card, cIdx,
+}: { card: Card; cIdx: number }) {
+  const targetRef = useRef<HTMLDivElement>(null);
+  const [landed, setLanded] = useState(false);
 
   return (
-    <motion.div
-      initial={{ x: ix, y: iy, opacity: 0, rotate: -11, scale: 0.68 }}
-      animate={{
-        x: cIdx * 18,
-        y: [iy, arcApex, 0],
-        opacity: [0, 1, 1],
-        rotate: [-11, 2, 0],
-        scale: [0.68, 1.025, 1],
-      }}
-      transition={{
-        duration: 0.72,
-        x:       { ease: [0.20, 0, 0.15, 1] },
-        y:       { ease: ['easeIn', 'easeOut'], times: [0, 0.15, 1] },
-        opacity: { duration: 0.10 },
-        rotate:  { ease: 'easeOut', duration: 0.72 },
-        scale:   { ease: 'easeOut', duration: 0.72 },
-      }}
-      style={{ position: 'absolute', top: 0, filter: 'drop-shadow(0 8px 8px rgba(0,0,0,0.28))' }}
-    >
-      <PlayingCard card={card} />
-    </motion.div>
+    <div ref={targetRef} style={{ position: 'absolute', top: 0, left: cIdx * 18, width: 68, height: 96 }}>
+      <div style={{ opacity: landed ? 1 : 0 }}><PlayingCard card={card} /></div>
+      {!landed && <GlobalCardFlight card={card} targetRef={targetRef} onLanded={() => setLanded(true)} />}
+    </div>
   );
 }
 
-function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, gameAreaRef, collectingCards = false }: {
+function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seatXPct, seatYPct = 80, isMobile = false, collectingCards = false }: {
   seat: Seat; state: any; dispatch: any; seatIndex: number;
   config: TableConfig; selectedChip: number;
   seatXPct: number; seatYPct?: number; isMobile?: boolean;
-  gameAreaRef: React.RefObject<HTMLDivElement | null>;
   collectingCards?: boolean;
 }) {
   // Circle radius scales down on mobile — extra step for 7-seat tables
@@ -1197,8 +1183,6 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 
   // Late surrender: first 2 cards only, not after a split
   const canSurrender = !!activeHand && activeHand.cards.length === 2 && !activeHand.isSplit;
-
-  const origin = cardDealOrigin(seatXPct, seatYPct, gameAreaRef);
 
   // ── EMPTY SEAT ───────────────────────────────────────────────────────────
   if (!seat.isActive) {
@@ -1352,7 +1336,6 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                     key={`${hand.id}-${cIdx}`}
                     card={card}
                     cIdx={cIdx}
-                    origin={origin}
                   />
                 ))}
               </div>
