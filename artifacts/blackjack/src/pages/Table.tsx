@@ -347,6 +347,9 @@ export default function Table() {
           {/* Card shoe */}
           <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
 
+          {/* Used cards accumulate here between shuffles */}
+          <DiscardTray discard={state.discard} decks={tableConfig.decks} isMobile={isMobile} />
+
           {/* Seats — arc point is the CENTRE of the bet circle; SeatSpot anchors to it */}
           {seatPositions.map(({ x, y }, i) => (
             <div key={i} style={{
@@ -837,35 +840,105 @@ function DealerZone({ state, gameAreaRef }: { state: any; gameAreaRef: React.Ref
 
 function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: number; isMobile?: boolean }) {
   const total = decks * 52;
-  const visible = Math.max(1, Math.ceil((shoe.length / total) * 12));
-  const w = isMobile ? 36 : 52;
-  const h = isMobile ? 52 : 76;
-  const cw = isMobile ? 32 : 46;
-  const ch = isMobile ? 44 : 64;
+  const fill = shoe.length / total;
+  const cardW = isMobile ? 37 : 58;
+  const cardH = isMobile ? 52 : 82;
+  const housingW = isMobile ? 56 : 88;
+  const housingH = isMobile ? 64 : 99;
   return (
-    <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, zIndex: 5, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))', transformOrigin: 'top right' }}>
-      <div style={{ position: 'relative', width: w, height: h }}>
-        {Array.from({ length: visible }).map((_, i) => (
-          <div key={i} style={{
-            position: 'absolute', top: i * 1.2, left: i % 2 === 0 ? 0 : 1,
-            width: cw, height: ch,
-            background: i % 2 === 0 ? '#0c4020' : '#0a3519',
-            border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4,
-            boxShadow: '0 1px 2px rgba(0,0,0,0.6)',
-          }} />
-        ))}
+    <div style={{ position: 'absolute', top: isMobile ? '2%' : '3.5%', right: '3%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 5, transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))', transformOrigin: 'top right' }}>
+      <div style={{ position: 'relative', width: housingW, height: housingH }}>
+        {/* Visible deck inside the transparent shoe */}
         <div style={{
-          position: 'absolute', top: visible * 1.2, left: 2,
-          width: cw, height: ch,
-          background: 'linear-gradient(135deg,#0f5230 0%,#062010 100%)',
-          border: '1px solid rgba(255,255,255,0.18)', borderRadius: 4,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'absolute', right: 9, bottom: 12,
+          width: cardW, height: Math.max(10, cardH * fill),
+          borderRadius: '4px 4px 2px 2px', overflow: 'hidden',
+          background: 'repeating-linear-gradient(0deg,#f4f0e7 0 1px,#9d9a92 1px 2px)',
+          border: '1px solid rgba(230,225,210,0.45)',
+          boxShadow: '-3px 3px 8px rgba(0,0,0,0.7)',
         }}>
-          <div style={{ width: cw * 0.65, height: ch * 0.72, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 2, opacity: 0.25 }} />
+          <div style={{
+            position: 'absolute', inset: '2px 2px auto', height: Math.min(cardH - 4, Math.max(8, cardH * fill - 4)),
+            borderRadius: 3,
+            background: 'repeating-linear-gradient(45deg,#71141b 0 3px,#9e2028 3px 6px,#e6d9b6 6px 7px)',
+            border: '1px solid rgba(255,245,220,0.55)',
+            boxShadow: 'inset 0 0 0 2px rgba(70,8,12,0.45)',
+          }} />
         </div>
+
+        {/* Smoked acrylic shoe housing */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          clipPath: 'polygon(18% 0,100% 12%,100% 79%,82% 100%,0 100%,0 24%)',
+          background: 'linear-gradient(125deg,rgba(70,76,82,0.82),rgba(13,16,18,0.94) 43%,rgba(2,3,4,0.98))',
+          border: '1px solid rgba(210,220,225,0.28)',
+          boxShadow: '0 8px 15px rgba(0,0,0,0.68), inset 2px 2px 2px rgba(255,255,255,0.12)',
+          pointerEvents: 'none',
+        }} />
+        <div style={{
+          position: 'absolute', left: 7, right: 5, bottom: 5, height: 18,
+          borderRadius: '3px 3px 7px 7px',
+          background: 'linear-gradient(180deg,#262b2e,#060708 75%)',
+          border: '1px solid rgba(255,255,255,0.11)',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.7), inset 0 2px 4px rgba(0,0,0,0.9)',
+        }}>
+          <div style={{ width: '58%', height: 4, margin: '5px auto 0', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
+        </div>
+        <div style={{ position: 'absolute', top: 8, left: 18, width: 2, height: '58%', transform: 'rotate(8deg)', background: 'rgba(255,255,255,0.15)', filter: 'blur(.2px)' }} />
       </div>
-      <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.22)', fontFamily: 'sans-serif', letterSpacing: '0.08em' }}>
-        {shoe.length}/{total}
+      <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', fontFamily: 'sans-serif', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+        Shoe · {shoe.length}/{total}
+      </div>
+    </div>
+  );
+}
+
+function DiscardTray({ discard, decks, isMobile = false }: { discard: Card[]; decks: number; isMobile?: boolean }) {
+  const total = decks * 52;
+  const fill = Math.min(1, discard.length / total);
+  const trayW = isMobile ? 52 : 82;
+  const trayH = isMobile ? 45 : 68;
+  const stackH = Math.max(3, fill * (isMobile ? 35 : 54));
+
+  return (
+    <div style={{
+      position: 'absolute', top: isMobile ? '2%' : '3.5%', left: '3%',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 5,
+      transform: isMobile ? undefined : 'scale(var(--table-ui-scale, 1))', transformOrigin: 'top left',
+    }}>
+      <div style={{
+        position: 'relative', width: trayW, height: trayH,
+        borderRadius: '6px 6px 10px 10px',
+        background: 'linear-gradient(135deg,rgba(75,80,83,0.88),rgba(10,12,13,0.97) 48%,#020303)',
+        border: '1px solid rgba(220,225,225,0.25)',
+        boxShadow: '0 7px 14px rgba(0,0,0,0.68), inset 1px 1px 2px rgba(255,255,255,0.12)',
+      }}>
+        <div style={{
+          position: 'absolute', left: 7, right: 7, bottom: 7, height: trayH - 17,
+          borderRadius: '3px 3px 7px 7px',
+          background: '#050606', border: '1px solid rgba(255,255,255,0.07)',
+          boxShadow: 'inset 0 5px 10px rgba(0,0,0,0.95)', overflow: 'hidden',
+        }}>
+          {discard.length > 0 && (
+            <div style={{
+              position: 'absolute', left: 4, right: 4, bottom: 3, height: stackH,
+              borderRadius: '3px 3px 2px 2px',
+              background: 'repeating-linear-gradient(0deg,#e7e3da 0 1px,#918e87 1px 2px)',
+              border: '1px solid rgba(225,220,205,0.35)',
+              boxShadow: '0 -2px 5px rgba(0,0,0,0.5)',
+            }}>
+              <div style={{
+                position: 'absolute', left: 1, right: 1, top: -2, height: 8, borderRadius: 3,
+                background: 'repeating-linear-gradient(45deg,#71141b 0 3px,#9e2028 3px 6px,#e6d9b6 6px 7px)',
+                border: '1px solid rgba(255,245,220,0.45)',
+              }} />
+            </div>
+          )}
+        </div>
+        <div style={{ position: 'absolute', left: 5, right: 5, top: 4, height: 3, borderRadius: 3, background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.24),transparent)' }} />
+      </div>
+      <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', fontFamily: 'sans-serif', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+        Discard · {discard.length}
       </div>
     </div>
   );
@@ -1112,7 +1185,9 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           const isThisHand = isPlayerTurn && seat.activeHandIndex === hIdx;
           const val = calculateHandValue(hand.cards);
           const handW = Math.max(68, 68 + (hand.cards.length - 1) * 18);
-          const handH = Math.max(96, 96 + (hand.cards.length - 1) * 18);
+          // Cards fan horizontally. Keeping the container height fixed prevents
+          // the whole hand from jumping upward whenever HIT adds another card.
+          const handH = 96;
 
           return (
             <div key={hand.id} style={{
