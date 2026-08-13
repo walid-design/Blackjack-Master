@@ -349,20 +349,7 @@ export default function Table() {
             </div>
           ))}
 
-          {/* ── GOLD OVAL SEAT RINGS — decorative, sit underneath everything ── */}
-          {seatPositions.map(({ x, y }, i) => (
-            <div key={`oval-${i}`} style={{
-              position: 'absolute',
-              left: `${x}%`, top: `${y}%`,
-              transform: 'translate(-50%, -50%)',
-              width: 78, height: 60,
-              borderRadius: '50%',
-              border: '1.5px solid rgba(212,168,32,0.28)',
-              boxShadow: '0 0 14px rgba(212,168,32,0.07), inset 0 0 6px rgba(212,168,32,0.04)',
-              pointerEvents: 'none',
-              zIndex: 3,
-            }} />
-          ))}
+          {/* oval rings removed — they doubled up with the SIT dashed circles */}
 
           {/* (i) Side bet payout info button — only when table has non-insurance side bets */}
           {tableConfig.sideBets.filter(s => s !== 'insurance').length > 0 && (
@@ -371,7 +358,7 @@ export default function Table() {
               onClick={() => setShowPayouts(p => !p)}
               style={{
                 position: 'absolute',
-                top: '38%', left: '9%',
+                top: '16%', left: '7%',
                 width: 26, height: 26, borderRadius: '50%',
                 background: showPayouts ? 'rgba(212,168,32,0.25)' : 'rgba(0,0,0,0.45)',
                 border: `1.5px solid ${showPayouts ? 'rgba(212,168,32,0.7)' : 'rgba(255,255,255,0.22)'}`,
@@ -395,7 +382,7 @@ export default function Table() {
             key="felt-bet-anchor"
             style={{
               position: 'absolute',
-              top: '53%',
+              top: '36%',
               left: '50%',
               transform: 'translateX(-50%)',
               zIndex: 40,
@@ -410,7 +397,6 @@ export default function Table() {
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 gap: 14, pointerEvents: 'all',
-                transform: 'translateY(-50%)',
               }}
             >
               {/* ── Curved chip row ── */}
