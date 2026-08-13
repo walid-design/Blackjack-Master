@@ -981,7 +981,7 @@ function PlayerCardAnim({
   card, cIdx, origin,
 }: { card: Card; cIdx: number; origin: { x: number; y: number } }) {
   // Freeze origin at mount time — never update.
-  const ix       = useRef(origin.x - cIdx * 17).current;
+  const ix       = useRef(origin.x - cIdx * 18).current;
   const iy       = useRef(origin.y).current;
   const arcApex  = iy * 1.12;   // 12% higher than the shoe height for the arc
 
@@ -989,7 +989,7 @@ function PlayerCardAnim({
     <motion.div
       initial={{ x: ix, y: iy, opacity: 0, rotate: -20, scale: 0.82 }}
       animate={{
-        x: cIdx * 17,
+        x: cIdx * 18,
         y: [iy, arcApex, 0],
         opacity: [0, 1, 1],
         rotate: 0,
@@ -1111,8 +1111,8 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
         {seat.hands.map((hand: Hand, hIdx: number) => {
           const isThisHand = isPlayerTurn && seat.activeHandIndex === hIdx;
           const val = calculateHandValue(hand.cards);
-          const handW = Math.max(62, 62 + (hand.cards.length - 1) * 17);
-          const handH = Math.max(88, 88 + (hand.cards.length - 1) * 17);
+          const handW = Math.max(68, 68 + (hand.cards.length - 1) * 18);
+          const handH = Math.max(96, 96 + (hand.cards.length - 1) * 18);
 
           return (
             <div key={hand.id} style={{

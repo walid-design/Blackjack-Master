@@ -14,8 +14,8 @@ interface PlayingCardProps {
 }
 
 export function PlayingCard({ card, faceDown = false, compact = false, style }: PlayingCardProps) {
-  const w = compact ? 50 : 62;
-  const h = compact ? 70 : 88;
+  const w = compact ? 54 : 68;
+  const h = compact ? 76 : 96;
   const isRed = card.suit === 'hearts' || card.suit === 'diamonds';
   const sym = SUIT_SYMBOLS[card.suit] ?? '?';
 
@@ -48,8 +48,8 @@ export function PlayingCard({ card, faceDown = false, compact = false, style }: 
     );
   }
 
-  const rf = compact ? 10 : 13;
-  const cf = compact ? 20 : 28;
+  const rf = compact ? 11 : 15;
+  const cf = compact ? 22 : 31;
   const color = isRed ? '#c8001a' : '#0d0d0d';
 
   return (
