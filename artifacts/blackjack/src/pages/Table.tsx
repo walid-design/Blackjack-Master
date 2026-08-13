@@ -410,20 +410,25 @@ export default function Table() {
                     <motion.div
                       key={amount}
                       data-testid={`chip-felt-${amount}`}
-                      style={{ marginBottom: arcDip, cursor: 'pointer' }}
+                      style={{ marginBottom: arcDip, cursor: 'pointer', position: 'relative' }}
                       whileHover={{ scale: 1.18, y: -6 }}
                       whileTap={{ scale: 0.88 }}
-                      onClick={() => {
-                        const targetSeat = (state.bettingSeatId >= 0)
-                          ? state.bettingSeatId
-                          : (state.seats as any[]).findIndex((s: any) => s.isActive);
-                        if (targetSeat >= 0) {
-                          if (state.bettingSeatId !== targetSeat) dispatch({ type: 'SELECT_BET_SEAT', seatId: targetSeat });
-                          dispatch({ type: 'PLACE_BET', seatId: targetSeat, amount });
-                          setSelectedChip(amount);
-                        }
-                      }}
+                      onClick={() => setSelectedChip(amount)}
                     >
+                      {/* Selection ring — glows when this denomination is armed */}
+                      {selectedChip === amount && (
+                        <motion.div
+                          layoutId="chip-selection-ring"
+                          style={{
+                            position: 'absolute',
+                            inset: -5,
+                            borderRadius: '50%',
+                            border: '2px solid rgba(240,184,48,0.9)',
+                            boxShadow: '0 0 10px rgba(240,184,48,0.55), inset 0 0 6px rgba(240,184,48,0.15)',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
                       <Chip amount={amount} size={sz} />
                     </motion.div>
                   );
