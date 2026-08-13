@@ -400,24 +400,25 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return { ...state, phase: 'DEALER_TURN' };
     }
     case 'DEALER_PLAY': {
-      // Compute all dealer cards at once; animation is handled by stagger in UI
+      // Draw exactly one card per action. The UI waits for that card to land
+      // before dispatching again, matching a real dealer's draw cadence.
       const s = { ...state, shoe: [...state.shoe] };
-      let dealerCards = [...s.dealerCards];
+      const dealerCards = [...s.dealerCards];
+      const currentVal = calculateHandValue(dealerCards);
 
-      while (true) {
-        const { total } = calculateHandValue(dealerCards);
-        if (total >= 17) break;
+      if (currentVal.total < 17) {
         const card = s.shoe.pop();
-        if (!card) break;
-        dealerCards.push(card);
+        if (card) dealerCards.push(card);
       }
 
       if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
 
       const finalVal = calculateHandValue(dealerCards);
       s.dealerCards = dealerCards;
-      s.dealerStatus = finalVal.total > 21 ? 'busted' as any : 'stood' as any;
-      s.phase = 'SETTLEMENT';
+      if (finalVal.total >= 17 || s.shoe.length === 0) {
+        s.dealerStatus = finalVal.total > 21 ? 'busted' as any : 'stood' as any;
+        s.phase = 'SETTLEMENT';
+      }
       return s;
     }
 

@@ -181,12 +181,17 @@ export default function Table() {
     })();
   }, [state.phase, (state as any).splitCardTarget]);
 
-  // Dealer plays after 1.4s pause
+  // Dealer draws one card at a time. Each new draw waits for the previous
+  // 820ms flight to land before the total is evaluated again.
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
-    const t = setTimeout(() => dispatch({ type: 'DEALER_PLAY' }), 1800);
+    const isInitialTurn = state.dealerCards.length <= 2;
+    const t = setTimeout(
+      () => dispatch({ type: 'DEALER_PLAY' }),
+      isInitialTurn ? 1250 : 1050,
+    );
     return () => clearTimeout(t);
-  }, [state.phase]);
+  }, [state.phase, state.dealerCards.length]);
 
   // Sweep the cards to the discard tray, then open the next round.
   useEffect(() => {
@@ -196,16 +201,10 @@ export default function Table() {
     return () => { clearTimeout(collectTimer); clearTimeout(roundTimer); };
   }, [(state as any).settled]);
 
-  // Trigger settlement — delay grows with dealer card count so all stagger
-  // animations (delay: i × 120ms) finish before results are revealed.
+  // Settlement waits until the final dealer card's global flight has landed.
   useEffect(() => {
     if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
-      const cardCount: number = (state.dealerCards || []).length;
-      // last card stagger: (cardCount-1)*120ms + spring settle ~650ms
-      // Last extra dealer card (index cardCount-1) has stagger (cardCount-2)*900ms
-      // plus 550ms slide + 900ms buffer before revealing results.
-      const delay = Math.max(1200, (cardCount - 2) * 900 + 1450);
-      const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), delay);
+      const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), 1050);
       return () => clearTimeout(t);
     }
     return undefined;
@@ -685,7 +684,7 @@ function GlobalCardFlight({ card, targetRef, faceDown = false, onLanded }: {
       endScale: Math.max(0.75, end.width / 68),
     });
 
-    const timer = window.setTimeout(onLanded, 820);
+    const timer = window.setTimeout(onLanded, 780);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -695,13 +694,13 @@ function GlobalCardFlight({ card, targetRef, faceDown = false, onLanded }: {
     <motion.div
       initial={{ x: path.sx, y: path.sy, opacity: 0, rotate: 7, scale: 0.72 }}
       animate={{
-        x: [path.sx, path.sx - 12, path.mx, path.ex],
-        y: [path.sy, path.sy - 3, path.my, path.ey],
-        opacity: [0, 1, 1, 1],
-        rotate: [7, 5, -1, 0],
-        scale: [0.72, 0.82, path.endScale * 1.015, path.endScale],
+        x: [path.sx, path.mx, path.ex],
+        y: [path.sy, path.my, path.ey],
+        opacity: [0, 1, 1],
+        rotate: [7, -1, 0],
+        scale: [0.72, path.endScale * 1.015, path.endScale],
       }}
-      transition={{ duration: 0.82, times: [0, 0.1, 0.48, 1], ease: [0.18, 0.72, 0.16, 1] }}
+      transition={{ duration: 0.78, times: [0, 0.48, 1], ease: [0.18, 0.72, 0.16, 1] }}
       style={{
         position: 'fixed', left: 0, top: 0, width: 68, height: 96,
         zIndex: 9999, pointerEvents: 'none', transformOrigin: 'top left',
@@ -819,16 +818,13 @@ function DealerZone({ state, collectingCards = false }: { state: any; collecting
   useEffect(() => {
     if (!revealed || dealerCards.length === 0) { setBadgeReady(false); return; }
     if (state.phase !== 'SETTLEMENT') {
-      // During DEALER_TURN the hole card is visible — show running total immediately.
-      // But only if no extra cards will arrive (i.e. we won't later get a surprise jump).
-      setBadgeReady(true);
+      // Do not expose a running result while the dealer is still drawing.
+      setBadgeReady(false);
       return;
     }
-    // Phase just became SETTLEMENT (DEALER_PLAY fired, possibly adding extra cards).
-    // Hide badge instantly, then reveal after all stagger animations have settled.
+    // Reveal the final total only after the last global card flight has landed.
     setBadgeReady(false);
-    const delay = Math.max(800, (dealerCards.length - 2) * 900 + 1200);
-    const t = setTimeout(() => setBadgeReady(true), delay);
+    const t = setTimeout(() => setBadgeReady(true), 900);
     return () => { clearTimeout(t); setBadgeReady(false); };
   }, [state.phase, dealerCards.length, revealed]);
 
