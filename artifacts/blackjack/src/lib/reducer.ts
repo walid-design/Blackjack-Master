@@ -134,7 +134,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         };
       });
       // Clear lastBets so a second Repeat click is a no-op (no double-charge)
-      s.lastBets = null;
+      s.lastBets = undefined;
       return s;
     }
 
@@ -267,7 +267,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       seat.hands[hi] = hand;
       s.seats[s.activeSeatIndex] = seat;
 
-      if (hand.status !== 'playing') return moveToNextHand(s);
+      if (hand.status !== 'playing') return { ...s, pendingTurnAdvance: true };
       return s;
     }
     case 'STAND': {
@@ -300,7 +300,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         status: val.total > 21 ? 'busted' : 'stood',
       };
       s.seats[s.activeSeatIndex] = seat;
-      return moveToNextHand(s);
+      return { ...s, pendingTurnAdvance: true };
     }
     case 'SPLIT': {
       const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
@@ -392,7 +392,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return moveToNextHand(s);
     }
     case 'NEXT_HAND': {
-      return moveToNextHand(state);
+      return moveToNextHand({ ...state, pendingTurnAdvance: false });
     }
 
     // ── Dealer ────────────────────────────────────────────────────────────────

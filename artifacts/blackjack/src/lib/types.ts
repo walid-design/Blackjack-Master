@@ -10,6 +10,8 @@ export interface GameState {
   activeSeatIndex: number;
   cutCardIndex: number;
   needsShuffle: boolean;
+  /** True while a turn-ending HIT/DOUBLE card is still flying to the hand. */
+  pendingTurnAdvance?: boolean;
   bankroll: number;
   bettingSeatId?: number;
   /** Set during SPLIT_DEALING — which hand index within activeSeatIndex gets the next card */

@@ -125,7 +125,7 @@ export default function Table() {
   const [dealerHistory, setDealerHistory] = useState<DealerHistoryEntry[]>([]);
   const historyRecordedRef = useRef(false);
   useEffect(() => {
-    if (state.phase === 'SETTLEMENT' && !historyRecordedRef.current && state.dealerCards.length > 0) {
+    if (state.phase === 'SETTLEMENT' && (state as any).settled && !historyRecordedRef.current && state.dealerCards.length > 0) {
       historyRecordedRef.current = true;
       const val = calculateHandValue(state.dealerCards);
       setDealerHistory(prev => [
@@ -133,8 +133,8 @@ export default function Table() {
         { total: val.total, bust: val.total > 21, bj: state.dealerStatus === 'blackjack' },
       ]);
     }
-    if (state.phase !== 'SETTLEMENT') historyRecordedRef.current = false;
-  }, [state.phase, state.dealerCards, state.dealerStatus]);
+    if (state.phase !== 'SETTLEMENT' || !(state as any).settled) historyRecordedRef.current = false;
+  }, [state.phase, state.dealerCards, state.dealerStatus, (state as any).settled]);
 
   // DEALING: right-to-left (reverse seat order, 550ms per card)
   const dealingRef = useRef(false);
@@ -181,14 +181,14 @@ export default function Table() {
     })();
   }, [state.phase, (state as any).splitCardTarget]);
 
-  // Dealer draws one card at a time. Each new draw waits for the previous
-  // 820ms flight to land before the total is evaluated again.
+  // Dealer draws one card at a time. The pause starts only after any
+  // turn-ending player card has landed and the dealer phase actually begins.
   useEffect(() => {
     if (state.phase !== 'DEALER_TURN') return;
     const isInitialTurn = state.dealerCards.length <= 2;
     const t = setTimeout(
       () => dispatch({ type: 'DEALER_PLAY' }),
-      isInitialTurn ? 1250 : 1050,
+      isInitialTurn ? 1350 : 1200,
     );
     return () => clearTimeout(t);
   }, [state.phase, state.dealerCards.length]);
@@ -660,8 +660,11 @@ function GlobalCardFlight({ card, targetRef, faceDown = false, onLanded }: {
   onLanded: () => void;
 }) {
   const [path, setPath] = useState<null | {
-    sx: number; sy: number; mx: number; my: number; ex: number; ey: number; endScale: number;
+    d: string;
+    endScale: number;
   }>(null);
+  const flightRef = useRef<HTMLDivElement>(null);
+  const onLandedRef = useRef(onLanded);
 
   useEffect(() => {
     const shoe = document.getElementById('card-shoe-mouth');
@@ -673,42 +676,58 @@ function GlobalCardFlight({ card, targetRef, faceDown = false, onLanded }: {
 
     const start = shoe.getBoundingClientRect();
     const end = target.getBoundingClientRect();
-    const sx = start.left + start.width * 0.35 - 34;
-    const sy = start.top + start.height * 0.5 - 48;
-    const ex = end.left;
-    const ey = end.top;
+    const sx = start.left + start.width * 0.35;
+    const sy = start.top + start.height * 0.5;
+    const ex = end.left + end.width * 0.5;
+    const ey = end.top + end.height * 0.5;
+    const dx = ex - sx;
+    const dy = ey - sy;
+    // A single cubic Bézier creates continuous curvature from the first pixel.
+    // Its initial tangent already points toward the hand—there is no pull-out
+    // line or intermediate straight keyframe.
+    const c1x = sx + dx * 0.24;
+    const c1y = sy + Math.max(10, dy * 0.08);
+    const c2x = ex - dx * 0.20;
+    const c2y = ey - Math.max(28, Math.abs(dy) * 0.26);
     setPath({
-      sx, sy, ex, ey,
-      mx: sx + (ex - sx) * 0.48,
-      my: Math.min(sy, ey) - Math.max(18, Math.abs(ey - sy) * 0.12),
+      d: `M ${sx} ${sy} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${ex} ${ey}`,
       endScale: Math.max(0.75, end.width / 68),
     });
-
-    const timer = window.setTimeout(onLanded, 780);
-    return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const element = flightRef.current;
+    if (!element || !path) return;
+    const animation = element.animate(
+      [
+        { offsetDistance: '0%', opacity: 0, transform: 'rotate(6deg) scale(0.72)' },
+        { offsetDistance: '12%', opacity: 1, transform: 'rotate(3deg) scale(0.84)', offset: 0.12 },
+        { offsetDistance: '76%', opacity: 1, transform: `rotate(-1deg) scale(${path.endScale * 1.015})`, offset: 0.76 },
+        { offsetDistance: '100%', opacity: 1, transform: `rotate(0deg) scale(${path.endScale})` },
+      ] as Keyframe[],
+      { duration: 860, easing: 'cubic-bezier(0.18, 0.72, 0.16, 1)', fill: 'forwards' },
+    );
+    animation.onfinish = () => onLandedRef.current();
+    return () => animation.cancel();
+  }, [path]);
 
   if (!path) return null;
 
   return createPortal(
-    <motion.div
-      initial={{ x: path.sx, y: path.sy, opacity: 0, rotate: 7, scale: 0.72 }}
-      animate={{
-        x: [path.sx, path.mx, path.ex],
-        y: [path.sy, path.my, path.ey],
-        opacity: [0, 1, 1],
-        rotate: [7, -1, 0],
-        scale: [0.72, path.endScale * 1.015, path.endScale],
-      }}
-      transition={{ duration: 0.78, times: [0, 0.48, 1], ease: [0.18, 0.72, 0.16, 1] }}
+    <div
+      ref={flightRef}
       style={{
         position: 'fixed', left: 0, top: 0, width: 68, height: 96,
-        zIndex: 9999, pointerEvents: 'none', transformOrigin: 'top left',
+        zIndex: 9999, pointerEvents: 'none', transformOrigin: 'center',
         filter: 'drop-shadow(0 12px 10px rgba(0,0,0,0.38))',
-      }}
+        offsetPath: `path('${path.d}')`,
+        offsetDistance: '0%',
+        offsetAnchor: 'center',
+        offsetRotate: '0deg',
+      } as CSSProperties}
     >
       <PlayingCard card={card} faceDown={faceDown} />
-    </motion.div>,
+    </div>,
     document.body,
   );
 }
@@ -1131,15 +1150,21 @@ function BonusPaidToast({
 // animation → cards flash back to the shoe position.
 // ─────────────────────────────────────────────────────────────────────────────
 function PlayerCardAnim({
-  card, cIdx,
-}: { card: Card; cIdx: number }) {
+  card, cIdx, onLanded,
+}: { card: Card; cIdx: number; onLanded?: () => void }) {
   const targetRef = useRef<HTMLDivElement>(null);
   const [landed, setLanded] = useState(false);
 
   return (
     <div ref={targetRef} style={{ position: 'absolute', top: 0, left: cIdx * 18, width: 68, height: 96 }}>
       <div style={{ opacity: landed ? 1 : 0 }}><PlayingCard card={card} /></div>
-      {!landed && <GlobalCardFlight card={card} targetRef={targetRef} onLanded={() => setLanded(true)} />}
+      {!landed && (
+        <GlobalCardFlight
+          card={card}
+          targetRef={targetRef}
+          onLanded={() => { setLanded(true); onLanded?.(); }}
+        />
+      )}
     </div>
   );
 }
@@ -1332,6 +1357,11 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                     key={`${hand.id}-${cIdx}`}
                     card={card}
                     cIdx={cIdx}
+                    onLanded={
+                      state.pendingTurnAdvance && isThisHand && cIdx === hand.cards.length - 1
+                        ? () => dispatch({ type: 'NEXT_HAND' })
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -1533,7 +1563,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           `right: -R` (panel's right edge pins to the circle's right edge, grows left).
           Left-edge seats use `left: -R`. Center seats use left:0 + translateX(-50%). */}
       <AnimatePresence>
-        {!isMobile && isPlayerTurn && !hasNaturalBJ && (
+        {!isMobile && isPlayerTurn && !state.pendingTurnAdvance && !hasNaturalBJ && (
           <div style={{
             position: 'absolute', top: R + 8,
             ...(seatXPct < 33
@@ -1573,7 +1603,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
-  if (state.phase !== 'PLAYER_TURN') return null;
+  if (state.phase !== 'PLAYER_TURN' || state.pendingTurnAdvance) return null;
   const seat: Seat | undefined = state.seats[state.activeSeatIndex];
   const activeHand: Hand | undefined = seat?.hands[seat.activeHandIndex];
   if (!activeHand) return null;
