@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import Lobby from '@/pages/Lobby';
 import Table from '@/pages/Table';
 import NotFound from '@/pages/not-found';
+import { EconomyProvider } from '@/economy/EconomyContext';
 
 const queryClient = new QueryClient();
 
@@ -31,12 +32,14 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL?.replace(/\/$/, '') || ''}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <EconomyProvider>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL?.replace(/\/$/, '') || ''}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </EconomyProvider>
     </QueryClientProvider>
   );
 }

@@ -24,6 +24,92 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /economy/products:
+    get:
+      operationId: getChipProducts
+      tags: [economy]
+      summary: Return the server-owned chip catalog
+      responses:
+        "200":
+          description: Product catalog and payment availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [currency, products, paymentsEnabled, disclosure]
+                properties:
+                  currency: { type: string, const: USD }
+                  paymentsEnabled: { type: boolean }
+                  disclosure: { type: string }
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChipProduct" }
+  /economy/session:
+    post:
+      operationId: createEconomySession
+      tags: [economy]
+      summary: Create or restore an HTTP-only guest session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              properties:
+                displayName: { type: string, minLength: 2, maxLength: 32 }
+      responses:
+        "201": { description: New player and one-time starter grant }
+        "200": { description: Existing session restored }
+        "400": { description: Invalid display name }
+  /economy/me:
+    get:
+      operationId: getEconomyProfile
+      tags: [economy]
+      summary: Return the authenticated player and ledger balance
+      responses:
+        "200":
+          description: Current economy profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EconomyProfile" }
+        "401": { description: Session required }
+  /economy/daily-reward:
+    post:
+      operationId: claimDailyReward
+      tags: [economy]
+      summary: Grant the daily play-chip reward once
+      responses:
+        "200": { description: Reward granted }
+        "409": { description: Reward already claimed for this UTC date }
+        "401": { description: Session required }
+  /economy/transactions:
+    get:
+      operationId: getWalletTransactions
+      tags: [economy]
+      summary: Return the latest append-only wallet entries
+      responses:
+        "200": { description: Balance and up to 50 transaction entries }
+        "401": { description: Session required }
+  /economy/checkout:
+    post:
+      operationId: createChipCheckout
+      tags: [economy]
+      summary: Create checkout for a server-owned SKU
+      description: Fails closed until a payment provider is configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sku]
+              properties:
+                sku: { type: string }
+      responses:
+        "503": { description: Payments are not configured }
+        "400": { description: Invalid SKU }
+        "401": { description: Session required }
 components:
   schemas:
     HealthStatus:
@@ -33,4 +119,26 @@ components:
           type: string
       required:
         - status
+    ChipProduct:
+      type: object
+      required: [sku, name, chips, bonus, priceMinor, currency]
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        chips: { type: integer, minimum: 1 }
+        bonus: { type: integer, minimum: 0 }
+        priceMinor: { type: integer, minimum: 1 }
+        currency: { type: string, const: USD }
+    EconomyProfile:
+      type: object
+      required: [player, balance, dailyRewardAvailable]
+      properties:
+        player:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string, format: uuid }
+            displayName: { type: string }
+        balance: { type: integer, minimum: 0 }
+        dailyRewardAvailable: { type: boolean }
 

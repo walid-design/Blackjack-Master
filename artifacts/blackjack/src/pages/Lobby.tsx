@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { TABLES, TableConfig } from '@/lib/blackjack';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Gift, Sparkles } from 'lucide-react';
+import { ShopModal } from '@/components/ShopModal';
+import { DAILY_CHIPS, STARTER_CHIPS, useEconomy } from '@/economy/EconomyContext';
 
 // ── Card suit symbols ──────────────────────────────────────────────────────
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -28,42 +31,26 @@ const TABLE_ACCENTS: Record<string, { felt: string; glow: string; badge?: string
 };
 
 // ── Buy-in amounts ─────────────────────────────────────────────────────────
-const BUY_INS = [500, 1_000, 5_000, 10_000, 50_000];
-
 // ──────────────────────────────────────────────────────────────────────────
 export default function Lobby() {
   const [, setLocation] = useLocation();
-  const [playerName, setPlayerName]   = useState('');
-  const [buyIn, setBuyIn]             = useState<number>(1_000);
-  const [hasVisited, setHasVisited]   = useState(false);
-  const [bankroll, setBankroll]       = useState(0);
-  const [nameError, setNameError]     = useState(false);
-  const [showRebuy, setShowRebuy]     = useState(false);
-  const [rebuyAmount, setRebuyAmount] = useState<number>(1_000);
-
-  useEffect(() => {
-    const savedName     = localStorage.getItem('bj_player_name');
-    const savedBankroll = localStorage.getItem('bj_bankroll');
-    if (savedName && savedBankroll) {
-      setPlayerName(savedName);
-      setBankroll(parseInt(savedBankroll, 10));
-      setHasVisited(true);
-    }
-  }, []);
+  const economy = useEconomy();
+  const [playerName, setPlayerName] = useState(economy.state.displayName);
+  const [nameError, setNameError] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [rewardMessage, setRewardMessage] = useState('');
+  const hasVisited = economy.hasProfile;
+  const bankroll = economy.state.balance;
 
   const handleEnterCasino = () => {
     if (!playerName.trim()) { setNameError(true); return; }
-    localStorage.setItem('bj_player_name', playerName);
-    localStorage.setItem('bj_bankroll', buyIn.toString());
-    setBankroll(buyIn);
-    setHasVisited(true);
+    economy.createProfile(playerName);
     setNameError(false);
   };
 
-  const handleRebuy = () => {
-    localStorage.setItem('bj_bankroll', rebuyAmount.toString());
-    setBankroll(rebuyAmount);
-    setShowRebuy(false);
+  const handleDailyReward = () => {
+    const granted = economy.claimDailyReward();
+    if (granted) setRewardMessage(`+${granted.toLocaleString()} chips added`);
   };
 
   const handleJoinTable = (tableId: string) => setLocation(`/table/${tableId}`);
@@ -216,37 +203,17 @@ export default function Lobby() {
                   )}
                 </div>
 
-                {/* Buy-in */}
-                <div>
-                  <label style={{
-                    display: 'block', fontSize: 10, fontWeight: 600,
-                    letterSpacing: '0.18em', textTransform: 'uppercase',
-                    color: 'rgba(240,184,48,0.55)', marginBottom: 8,
-                    fontFamily: 'Inter, sans-serif',
-                  }}>Initial Buy-In</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                    {BUY_INS.map(amount => (
-                      <button
-                        key={amount}
-                        onClick={() => setBuyIn(amount)}
-                        style={{
-                          padding: '10px 4px',
-                          borderRadius: 7,
-                          border: `1px solid ${buyIn === amount ? 'rgba(240,184,48,0.7)' : 'rgba(255,255,255,0.08)'}`,
-                          background: buyIn === amount
-                            ? 'linear-gradient(135deg, rgba(240,184,48,0.22), rgba(253,230,138,0.10))'
-                            : 'rgba(255,255,255,0.07)',
-                          color: buyIn === amount ? '#f5cc50' : 'rgba(220,225,240,0.65)',
-                          fontSize: 13, fontWeight: 600,
-                          fontFamily: 'Inter, sans-serif',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s',
-                          boxShadow: buyIn === amount ? '0 0 14px rgba(240,184,48,0.12)' : 'none',
-                        }}
-                      >
-                        ${amount.toLocaleString()}
-                      </button>
-                    ))}
+                <div style={{
+                  display: 'flex', gap: 13, alignItems: 'center', padding: '14px 15px',
+                  borderRadius: 10, border: '1px solid rgba(240,184,48,0.18)',
+                  background: 'linear-gradient(135deg,rgba(240,184,48,0.11),rgba(255,255,255,0.035))',
+                }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(240,184,48,0.13)', color: '#f2c44f' }}>
+                    <Gift size={19} />
+                  </div>
+                  <div>
+                    <div style={{ color: 'rgba(255,255,255,0.48)', font: '700 9px Inter, sans-serif', letterSpacing: '0.14em', textTransform: 'uppercase' }}>Your welcome gift</div>
+                    <div style={{ color: '#f3c64f', font: '800 19px Inter, sans-serif', marginTop: 2 }}>{STARTER_CHIPS.toLocaleString()} free play chips</div>
                   </div>
                 </div>
 
@@ -299,77 +266,37 @@ export default function Lobby() {
                   Welcome back
                 </p>
                 <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 700, color: '#f5ead8', marginBottom: 12 }}>
-                  {playerName}
+                  {economy.state.displayName}
                 </h2>
 
-                {/* Stack pill + Change Stack toggle */}
+                {/* Stack and economy actions */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '8px 22px', background: 'rgba(240,184,48,0.07)', border: '1px solid rgba(240,184,48,0.18)', borderRadius: 999 }}>
-                    <span style={{ fontSize: 11, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.5)', fontFamily: 'Inter, sans-serif' }}>Stack</span>
+                    <Sparkles size={14} color="#f0b830" />
                     <span style={{ fontSize: 20, fontWeight: 700, color: '#f0b830', fontFamily: 'Inter, sans-serif', letterSpacing: '-0.01em' }}>
-                      ${bankroll.toLocaleString()}
+                      {bankroll.toLocaleString()}
                     </span>
+                    <span style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.45)', fontFamily: 'Inter, sans-serif' }}>chips</span>
                   </div>
 
-                  <button
-                    onClick={() => setShowRebuy(v => !v)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
-                      color: 'rgba(240,184,48,0.45)', fontFamily: 'Inter, sans-serif',
-                      textDecoration: 'underline', textUnderlineOffset: 3, padding: 0,
-                    }}
-                  >
-                    {showRebuy ? 'Cancel' : 'Change Stack'}
-                  </button>
-
-                  {/* Rebuy panel */}
-                  <AnimatePresence>
-                    {showRebuy && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -8, height: 0 }}
-                        animate={{ opacity: 1, y: 0, height: 'auto' }}
-                        exit={{ opacity: 0, y: -8, height: 0 }}
-                        transition={{ duration: 0.22 }}
-                        style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, paddingTop: 4 }}
-                      >
-                        {/* Amount chips */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                          {BUY_INS.map(amt => (
-                            <button
-                              key={amt}
-                              onClick={() => setRebuyAmount(amt)}
-                              style={{
-                                padding: '6px 18px',
-                                borderRadius: 999,
-                                border: `1px solid ${rebuyAmount === amt ? 'rgba(240,184,48,0.7)' : 'rgba(255,255,255,0.12)'}`,
-                                background: rebuyAmount === amt ? 'rgba(240,184,48,0.12)' : 'rgba(255,255,255,0.04)',
-                                color: rebuyAmount === amt ? '#f0b830' : 'rgba(255,255,255,0.45)',
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: 13, fontWeight: 600,
-                                cursor: 'pointer', transition: 'all 0.15s',
-                              }}
-                            >
-                              ${amt.toLocaleString()}
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          onClick={handleRebuy}
-                          style={{
-                            padding: '8px 32px',
-                            background: 'linear-gradient(135deg,#b8820a,#e8b830 45%,#fde068 70%,#c89a18)',
-                            border: 'none', borderRadius: 4,
-                            color: '#000', fontWeight: 700, fontSize: 12,
-                            letterSpacing: '0.18em', textTransform: 'uppercase',
-                            fontFamily: 'Inter, sans-serif', cursor: 'pointer',
-                          }}
-                        >
-                          Set Stack to ${rebuyAmount.toLocaleString()}
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                    <button data-testid="open-shop" onClick={() => setShopOpen(true)} style={economyButtonStyle}>Get chips</button>
+                    <button
+                      data-testid="claim-daily"
+                      onClick={handleDailyReward}
+                      disabled={!economy.dailyRewardAvailable}
+                      style={{ ...economyButtonStyle, opacity: economy.dailyRewardAvailable ? 1 : 0.45, cursor: economy.dailyRewardAvailable ? 'pointer' : 'default' }}
+                    >{economy.dailyRewardAvailable ? `Claim ${DAILY_CHIPS.toLocaleString()} daily` : `Daily claimed · ${economy.state.dailyStreak} day streak`}</button>
+                  </div>
+                  {rewardMessage && <div data-testid="reward-message" style={{ color: '#76e4a8', font: '700 10px Inter, sans-serif' }}>{rewardMessage}</div>}
+                  <div style={{ display: 'flex', gap: 7, color: 'rgba(255,255,255,0.36)', font: '700 9px Inter, sans-serif', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    <span>Level {Math.floor(economy.state.xp / 250) + 1}</span>
+                    <span>·</span>
+                    <span>{economy.state.roundsPlayed} {economy.state.roundsPlayed === 1 ? 'round' : 'rounds'}</span>
+                    <span>·</span>
+                    <span>{economy.state.xp % 250}/250 XP</span>
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.25)', font: '9px Inter, sans-serif', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Play chips · no cash value</div>
                 </div>
               </motion.div>
 
@@ -392,9 +319,16 @@ export default function Lobby() {
           )}
         </AnimatePresence>
       </main>
+      <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />
     </div>
   );
 }
+
+const economyButtonStyle: React.CSSProperties = {
+  background: 'rgba(240,184,48,0.08)', border: '1px solid rgba(240,184,48,0.24)',
+  borderRadius: 999, cursor: 'pointer', color: '#eec554', padding: '7px 13px',
+  font: '700 9px Inter, sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase',
+};
 
 // ── TABLE CARD ─────────────────────────────────────────────────────────────
 function TableCard({ table, index, onJoin }: { table: TableConfig; index: number; onJoin: () => void }) {
@@ -493,13 +427,13 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
           <div style={{ flex: 1, padding: '10px 14px', borderRight: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={{ fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.45)', fontFamily: 'Inter, sans-serif', marginBottom: 3 }}>Min Bet</div>
             <div style={{ fontSize: 17, fontWeight: 700, color: '#f5ead8', fontFamily: 'Inter, sans-serif', letterSpacing: '-0.01em' }}>
-              ${table.minBet.toLocaleString()}
+              {table.minBet.toLocaleString()} chips
             </div>
           </div>
           <div style={{ flex: 1, padding: '10px 14px', textAlign: 'right' }}>
             <div style={{ fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(240,184,48,0.45)', fontFamily: 'Inter, sans-serif', marginBottom: 3 }}>Max Bet</div>
             <div style={{ fontSize: 17, fontWeight: 700, color: '#f5ead8', fontFamily: 'Inter, sans-serif', letterSpacing: '-0.01em' }}>
-              ${table.maxBet.toLocaleString()}
+              {table.maxBet.toLocaleString()} chips
             </div>
           </div>
         </div>

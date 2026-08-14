@@ -1,45 +1,52 @@
-# [Project name]
+# Royal Ace Blackjack
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A social-blackjack web game with realistic shoe dealing, multiple casino table themes, virtual play chips, daily rewards, progression, and a payment-safe chip-shop foundation.
 
-## Run & Operate
+## Run and verify
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `PORT=4173 BASE_PATH=/ pnpm --filter @workspace/blackjack run dev` — web app.
+- `PORT=5000 DATABASE_URL=... WEB_ORIGIN=http://localhost:4173 pnpm --filter @workspace/api-server run dev` — API.
+- `pnpm run test` — game-engine and economy tests.
+- `pnpm run typecheck` — full workspace type check.
+- `pnpm run build` — production builds.
+- `pnpm --filter @workspace/db run push` — push schema to a development PostgreSQL database.
 
-## Stack
+Required production environment:
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- `DATABASE_URL` — PostgreSQL connection string.
+- `WEB_ORIGIN` — exact HTTPS frontend origin; required in production.
+- `PORT` — process port.
+- `BASE_PATH` — frontend base path, normally `/`.
 
-## Where things live
+Never enable `VITE_ENABLE_DEMO_CHECKOUT` in a public build.
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+## Stack and source map
+
+- Web: React 19, Vite, TypeScript, Tailwind CSS, Framer Motion.
+- API: Express 5, signed-cookie-style opaque guest sessions, Zod-ready API workspace.
+- Database: PostgreSQL and Drizzle ORM.
+- Game rules and state: `artifacts/blackjack/src/lib`.
+- Economy UI/state: `artifacts/blackjack/src/economy/EconomyContext.tsx`.
+- Chip shop: `artifacts/blackjack/src/components/ShopModal.tsx`.
+- Economy API: `artifacts/api-server/src/routes/economy.ts`.
+- Database schema: `lib/db/src/schema/index.ts`.
+- Rollout and safety gates: `docs/ECONOMY-ROLL_OUT.md`.
+- QA coverage: `docs/QA-ECONOMY.md`.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- A wallet is an append-only transaction ledger; the displayed balance is the sum of its entries.
+- Server-owned SKUs determine price and chip grants. Browser-provided chip amounts are never trusted.
+- Starter and daily grants use unique idempotency keys and database uniqueness constraints.
+- Session tokens are random, stored only as hashes, sent as HTTP-only cookies, and expire after 30 days.
+- Credentialed CORS fails closed in production if `WEB_ORIGIN` is missing.
+- Checkout fails closed until payment-provider underwriting and signed webhook verification exist.
+- The local economy is deliberately labelled as a demo and is not suitable for paid credits.
 
-## Product
+## Product boundary
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Chips have no cash value and cannot be withdrawn, transferred, resold, exchanged, or used to obtain anything of value. Real-money gaming, prizes, cash-out, and transferable value are outside this product.
 
-## User preferences
+## Known go-live gate
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+Do not accept real payments yet. The payment provider and server-authoritative game-session layer must be completed before purchased chips are enabled. See `docs/ECONOMY-ROLL_OUT.md`.

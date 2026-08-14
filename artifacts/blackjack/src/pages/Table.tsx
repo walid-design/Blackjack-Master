@@ -7,10 +7,12 @@ import {
 } from '@/lib/blackjack';
 import { gameReducer, createInitialState } from '@/lib/reducer';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, ShoppingBag } from 'lucide-react';
 import { PlayingCard } from '@/components/PlayingCard';
 import { Chip, ChipStack, SideBetChip, BankrollStack, ChipBurst } from '@/components/Chip';
 import { createPortal } from 'react-dom';
+import { ShopModal } from '@/components/ShopModal';
+import { useEconomy } from '@/economy/EconomyContext';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -130,19 +132,19 @@ interface DealerHistoryEntry { total: number; bust: boolean; bj: boolean }
 export default function Table() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
+  const economy = useEconomy();
   const isMobile = useIsMobile();
   const tableUiScale = useTableUiScale();
   const tableConfig = TABLES.find(t => t.id === id);
 
-  const [playerName, setPlayerName] = useState('Player');
   useEffect(() => {
-    const n = localStorage.getItem('bj_player_name');
-    if (n) setPlayerName(n);
-  }, []);
+    if (!economy.hasProfile || !tableConfig) setLocation('/');
+  }, [economy.hasProfile, tableConfig, setLocation]);
+
+  const playerName = economy.state.displayName || 'Player';
 
   const initBankroll = useMemo(() => {
-    const s = localStorage.getItem('bj_bankroll');
-    return s ? parseInt(s, 10) : 1000;
+    return economy.state.balance || 1000;
   }, []);
 
   const [state, dispatch] = useReducer(
@@ -152,8 +154,8 @@ export default function Table() {
   );
 
   useEffect(() => {
-    localStorage.setItem('bj_bankroll', state.bankroll.toString());
-  }, [state.bankroll]);
+    economy.syncGameplayBalance(state.bankroll);
+  }, [state.bankroll, economy.syncGameplayBalance]);
 
   // Ref for the game-area container — used by child components to compute accurate
   // card-deal trajectories (shoe pixel position → seat pixel position).
@@ -162,6 +164,7 @@ export default function Table() {
   // Lifted chip selection – needed by ControlBar (display) and SeatSpot (bet placement)
   const [selectedChip, setSelectedChip] = useState(25);
   const [showPayouts, setShowPayouts] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
   const [collectingCards, setCollectingCards] = useState(false);
   const dealClickLockedRef = useRef(false);
 
@@ -186,9 +189,10 @@ export default function Table() {
         ...prev.slice(-14),
         { total: val.total, bust: val.total > 21, bj: state.dealerStatus === 'blackjack' },
       ]);
+      economy.recordCompletedRound();
     }
     if (state.phase !== 'SETTLEMENT' || !(state as any).settled) historyRecordedRef.current = false;
-  }, [state.phase, state.dealerCards, state.dealerStatus, (state as any).settled]);
+  }, [state.phase, state.dealerCards, state.dealerStatus, (state as any).settled, economy.recordCompletedRound]);
 
   // DEALING: right-to-left. Every timed action is tagged with this deal's
   // sequence number, and cleanup cancels the old loop if the phase changes.
@@ -285,7 +289,7 @@ export default function Table() {
     return undefined;
   }, [state.phase, (state as any).settled]);
 
-  if (!tableConfig) { setLocation('/'); return null; }
+  if (!tableConfig || !economy.hasProfile) return null;
 
   const theme = TABLE_THEMES[tableConfig.id] ?? TABLE_THEMES.classic;
   const seatPositions = getSeatPositions(tableConfig.seats, isMobile);
@@ -337,12 +341,17 @@ export default function Table() {
             {tableConfig.name.toUpperCase()}
           </div>
           <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.28)', fontFamily: 'sans-serif', marginTop: 1 }}>
-            {tableConfig.decks} Deck{tableConfig.decks > 1 ? 's' : ''} · ${tableConfig.minBet}–${tableConfig.maxBet}
+            {tableConfig.decks} Deck{tableConfig.decks > 1 ? 's' : ''} · {tableConfig.minBet.toLocaleString()}–{tableConfig.maxBet.toLocaleString()} chips
           </div>
         </div>
 
-        {/* Shoe gauge + % */}
+        {/* Shop + shoe gauge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <button data-testid="open-shop-table" aria-label="Open chip shop" onClick={() => setShopOpen(true)} style={{
+            width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center',
+            border: `1px solid ${theme.accentSoft}`, background: theme.accentSoft,
+            color: theme.accent, cursor: 'pointer', marginRight: 2,
+          }}><ShoppingBag size={14} /></button>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.22)', textTransform: 'uppercase', fontFamily: 'sans-serif', letterSpacing: '0.1em' }}>Shoe</div>
           <div style={{ width: 50, height: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 3, overflow: 'hidden' }}>
             <motion.div
@@ -719,6 +728,12 @@ export default function Table() {
         onDeal={handleDeal}
         anyActive={anyActive}
         isMobile={isMobile}
+        onOpenShop={() => setShopOpen(true)}
+      />
+      <ShopModal
+        open={shopOpen}
+        onClose={() => setShopOpen(false)}
+        onChipsGranted={amount => dispatch({ type: 'ADD_BANKROLL', amount })}
       />
     </div>
   );
@@ -1502,11 +1517,11 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
                   const isSurrender = hand.result === 'surrender';
                   const isBust = hand.result === 'bust';
                   const label = isBJ         ? '♠ BLACKJACK!'
-                    : isWin                  ? `+$${hand.payout ?? hand.bet}`
+                    : isWin                  ? `+${hand.payout ?? hand.bet}`
                     : isPush                 ? 'PUSH'
                     : isSurrender            ? 'SURRENDER'
                     : isBust                 ? 'BUST'
-                    : `-$${hand.bet}`;
+                    : `-${hand.bet}`;
                   const colors = isBJ
                     ? { bg: 'linear-gradient(135deg,#b8860b,#ffd700,#b8860b)', color: '#000', border: '#ffd700', glow: 'rgba(255,215,0,0.7)', fs: 13 }
                     : isWin
@@ -1679,7 +1694,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           zIndex: 50, minWidth: 140, boxShadow: '0 6px 24px rgba(0,0,0,0.8)',
         }}>
           <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#f0b830', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max ${Math.floor(currentBet / 2)}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max {Math.floor(currentBet / 2)} chips</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={() => dispatch({ type: 'INSURANCE', seatId: seatIndex })}
               style={{ flex: 1, padding: '4px 0', background: '#f0b830', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>Buy</button>
@@ -2008,7 +2023,7 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
               {(() => {
                 const total = sideBets.reduce((acc: number, sb: string) => acc + ((seat?.sideBets as any)?.[sb] ?? 0), 0);
                 return total > 0
-                  ? <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700 }}>Placed: ${total}</div>
+                  ? <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.7)', fontFamily: 'sans-serif', fontWeight: 700 }}>Placed: {total} chips</div>
                   : null;
               })()}
             </div>
@@ -2036,7 +2051,7 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
                   />
                   {placed > 0 && (
                     <div style={{ fontSize: 8, fontWeight: 700, color: '#f0b830', fontFamily: 'sans-serif' }}>
-                      ${placed}
+                      {placed}
                     </div>
                   )}
                 </div>
@@ -2053,10 +2068,10 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
 // Control Bar (simplified — chip tray + deal/next-round only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, onDeal, anyActive, isMobile = false }: {
+function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, onDeal, anyActive, isMobile = false, onOpenShop }: {
   state: any; dispatch: any; playerName: string; config: TableConfig;
   selectedChip: number; setSelectedChip: (n: number) => void;
-  canDeal: boolean; onDeal: () => void; anyActive: boolean; isMobile?: boolean;
+  canDeal: boolean; onDeal: () => void; anyActive: boolean; isMobile?: boolean; onOpenShop: () => void;
 }) {
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
   // Mobile chip sizes: slightly smaller to fit 5 chips in a row
@@ -2082,7 +2097,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             <BankrollStack
               amount={state.bankroll}
               low={state.bankroll < config.minBet && isBettingPhase}
-              onAddFunds={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
+              onAddFunds={onOpenShop}
             />
           </div>
           {/* Status / next-round */}
@@ -2137,7 +2152,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
         <BankrollStack
           amount={state.bankroll}
           low={state.bankroll < config.minBet && isBettingPhase}
-          onAddFunds={() => dispatch({ type: 'ADD_BANKROLL', amount: 1000 })}
+          onAddFunds={onOpenShop}
         />
       </div>
 

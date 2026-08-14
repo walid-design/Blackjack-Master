@@ -207,7 +207,7 @@ export function ChipStack({ amount }: { amount: number }) {
         background: 'rgba(0,0,0,0.75)', borderRadius: 8, padding: '1px 5px',
         fontSize: 9, color: '#d4a820', fontWeight: 700, fontFamily: 'sans-serif',
         whiteSpace: 'nowrap', letterSpacing: '0.04em',
-      }}>${amount}</div>
+      }}>{amount}</div>
     </div>
   );
 }
@@ -304,7 +304,7 @@ export function BankrollStack({ amount, low, onAddFunds }: BankrollStackProps) {
   const prev = useRef(amount);
   const [delta, setDelta] = useState<number | null>(null);
   const motionVal = useMotionValue(amount);
-  const displayVal = useTransform(motionVal, v => `$${Math.round(v).toLocaleString()}`);
+  const displayVal = useTransform(motionVal, v => `${Math.round(v).toLocaleString()} chips`);
 
   useEffect(() => {
     const d = amount - prev.current;
@@ -347,7 +347,7 @@ export function BankrollStack({ amount, low, onAddFunds }: BankrollStackProps) {
                 whiteSpace: 'nowrap', pointerEvents: 'none',
               }}
             >
-              {isWin ? '+' : ''}{delta < 0 ? '-' : ''}${Math.abs(delta).toLocaleString()}
+              {isWin ? '+' : ''}{delta < 0 ? '-' : ''}{Math.abs(delta).toLocaleString()}
             </motion.div>
           )}
         </AnimatePresence>
@@ -416,7 +416,7 @@ export function BankrollStack({ amount, low, onAddFunds }: BankrollStackProps) {
             border: '1px solid rgba(212,168,32,0.4)', borderRadius: 4, padding: '2px 8px',
             cursor: 'pointer', fontFamily: 'sans-serif',
           }}
-        >+$1,000</motion.button>
+        >Get chips</motion.button>
       )}
     </div>
   );
