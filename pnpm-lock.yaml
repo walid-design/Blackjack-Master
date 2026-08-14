@@ -186,6 +186,9 @@ importers:
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
+      '@workspace/blackjack-engine':
+        specifier: workspace:*
+        version: link:../../lib/blackjack-engine
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
@@ -352,6 +355,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/blackjack-engine':
+        specifier: workspace:*
+        version: link:../../lib/blackjack-engine
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -625,6 +631,8 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 3.25.76
+
+  lib/blackjack-engine: {}
 
   lib/db:
     dependencies:

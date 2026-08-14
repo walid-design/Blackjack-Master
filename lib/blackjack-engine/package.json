@@ -1,0 +1,12 @@
+{
+  "name": "@workspace/blackjack-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./blackjack": "./src/blackjack.ts",
+    "./types": "./src/types.ts",
+    "./reducer": "./src/reducer.ts"
+  }
+}

@@ -1,11 +1,10 @@
-import { useState, useEffect, useReducer, useRef, useMemo, CSSProperties, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, CSSProperties, useCallback } from 'react';
 import { useAnimationControls } from 'framer-motion';
 import { useLocation, useParams } from 'wouter';
 import {
   TABLES, TableConfig, Card, Hand, Seat,
   calculateHandValue, isBlackjack, SideBets,
 } from '@/lib/blackjack';
-import { gameReducer, createInitialState } from '@/lib/reducer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ShoppingBag } from 'lucide-react';
 import { PlayingCard } from '@/components/PlayingCard';
@@ -13,6 +12,7 @@ import { Chip, ChipStack, SideBetChip, BankrollStack, ChipBurst } from '@/compon
 import { createPortal } from 'react-dom';
 import { ShopModal } from '@/components/ShopModal';
 import { useEconomy } from '@/economy/EconomyContext';
+import { useServerGame } from '@/game/useServerGame';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -136,26 +136,28 @@ export default function Table() {
   const isMobile = useIsMobile();
   const tableUiScale = useTableUiScale();
   const tableConfig = TABLES.find(t => t.id === id);
+  const activeTableConfig = tableConfig ?? TABLES[0];
 
   useEffect(() => {
-    if (!economy.hasProfile || !tableConfig) setLocation('/');
-  }, [economy.hasProfile, tableConfig, setLocation]);
+    if (economy.ready && (!economy.hasProfile || !tableConfig)) setLocation('/');
+  }, [economy.ready, economy.hasProfile, tableConfig, setLocation]);
 
   const playerName = economy.state.displayName || 'Player';
 
   const initBankroll = useMemo(() => {
-    return economy.state.balance || 1000;
-  }, []);
+    return economy.hasProfile ? economy.state.balance : 0;
+  }, [economy.hasProfile, economy.state.balance]);
 
-  const [state, dispatch] = useReducer(
-    gameReducer as any,
-    null,
-    () => createInitialState(tableConfig!, initBankroll),
+  const { state, dispatch, error: gameServerError } = useServerGame(
+    activeTableConfig,
+    initBankroll,
+    economy.serverMode,
+    economy.setVerifiedBalance,
   );
 
   useEffect(() => {
-    economy.syncGameplayBalance(state.bankroll);
-  }, [state.bankroll, economy.syncGameplayBalance]);
+    if (!economy.serverMode) economy.syncGameplayBalance(state.bankroll);
+  }, [state.bankroll, economy.serverMode, economy.syncGameplayBalance]);
 
   // Ref for the game-area container — used by child components to compute accurate
   // card-deal trajectories (shoe pixel position → seat pixel position).
@@ -198,7 +200,7 @@ export default function Table() {
   // sequence number, and cleanup cancels the old loop if the phase changes.
   const dealingRef = useRef(false);
   useEffect(() => {
-    if (state.phase !== 'DEALING') {
+    if (economy.serverMode || state.phase !== 'DEALING') {
       dealingRef.current = false;
       return undefined;
     }
@@ -236,20 +238,20 @@ export default function Table() {
       cancelled = true;
       dealingRef.current = false;
     };
-  }, [state.phase, state.dealSequence]);
+  }, [economy.serverMode, state.phase, state.dealSequence]);
 
   // Deal one card to the active split hand; the next hand waits its turn.
   const splitDealingRef = useRef(false);
   useEffect(() => {
-    if (state.phase !== 'SPLIT_DEALING') { splitDealingRef.current = false; return; }
+    if (economy.serverMode || state.phase !== 'SPLIT_DEALING') { splitDealingRef.current = false; return; }
     if (splitDealingRef.current) return;
     splitDealingRef.current = true;
     const timer = setTimeout(() => dispatch({ type: 'SPLIT_CARD' }), 720);
     return () => clearTimeout(timer);
-  }, [state.phase, (state as any).splitCardTarget]);
+  }, [economy.serverMode, state.phase, (state as any).splitCardTarget]);
 
   useEffect(() => {
-    if (state.phase !== 'SHUFFLING') return;
+    if (economy.serverMode || state.phase !== 'SHUFFLING') return;
     const delay = state.shuffleStage === 'collecting'
       ? 900
       : state.shuffleStage === 'shuffling'
@@ -258,19 +260,19 @@ export default function Table() {
     const type = state.shuffleStage === 'burning' ? 'SHUFFLE_COMPLETE' : 'RESHUFFLE';
     const timer = setTimeout(() => dispatch({ type }), delay);
     return () => clearTimeout(timer);
-  }, [state.phase, state.shuffleStage]);
+  }, [economy.serverMode, state.phase, state.shuffleStage]);
 
   // Dealer draws one card at a time. The pause starts only after any
   // turn-ending player card has landed and the dealer phase actually begins.
   useEffect(() => {
-    if (state.phase !== 'DEALER_TURN') return;
+    if (economy.serverMode || state.phase !== 'DEALER_TURN') return;
     const isInitialTurn = state.dealerCards.length <= 2;
     const t = setTimeout(
       () => dispatch({ type: 'DEALER_PLAY' }),
       isInitialTurn ? 1350 : 1200,
     );
     return () => clearTimeout(t);
-  }, [state.phase, state.dealerCards.length]);
+  }, [economy.serverMode, state.phase, state.dealerCards.length]);
 
   // Sweep the cards to the discard tray, then open the next round.
   useEffect(() => {
@@ -282,12 +284,12 @@ export default function Table() {
 
   // Settlement waits until the final dealer card's global flight has landed.
   useEffect(() => {
-    if (state.phase === 'SETTLEMENT' && !(state as any).settled) {
+    if (!economy.serverMode && state.phase === 'SETTLEMENT' && !(state as any).settled) {
       const t = setTimeout(() => dispatch({ type: 'PERFORM_SETTLEMENT' }), 1050);
       return () => clearTimeout(t);
     }
     return undefined;
-  }, [state.phase, (state as any).settled]);
+  }, [economy.serverMode, state.phase, (state as any).settled]);
 
   if (!tableConfig || !economy.hasProfile) return null;
 
@@ -365,6 +367,18 @@ export default function Table() {
           </div>
         </div>
       </header>
+
+      {gameServerError && (
+        <div role="alert" style={{
+          position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)', zIndex: 120,
+          maxWidth: 'min(520px, calc(100% - 24px))', padding: '9px 14px', borderRadius: 8,
+          background: 'rgba(104,18,24,0.96)', border: '1px solid rgba(255,120,120,0.35)',
+          color: '#ffe5e5', font: '600 11px Inter, sans-serif', textAlign: 'center',
+          boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+        }}>
+          {gameServerError}
+        </div>
+      )}
 
       {/* ── DEALER HISTORY STRIP ── always rendered so it never causes a layout shift */}
       <div style={{

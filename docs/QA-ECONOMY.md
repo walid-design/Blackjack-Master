@@ -25,9 +25,23 @@
 - Complete a losing round and confirm wallet persistence and progression.
 - Check browser console errors in development and production preview.
 
+## Hosted-mode staging checklist
+
+- Create a guest session, refresh, and confirm the HTTP-only cookie restores the same ledger balance.
+- Send the same round request ID twice concurrently; verify one wager and the same stored response.
+- Send the same action request ID twice concurrently; verify one card, one version increment, and one ledger effect.
+- Send two different actions with the same expected version; verify one succeeds and one receives `STALE_GAME_VERSION`.
+- Start two table sessions against one nearly empty wallet; verify the player-wallet lock prevents an overdraw.
+- Inspect opening responses and confirm neither the private shoe nor the dealer hole-card identity appears before reveal.
+- Double, split, surrender, insure, and settle while comparing the wallet ledger with the visible result.
+- Refresh during a player turn and resume through `GET /api/games/sessions/:gameId`.
+- Run the ordered deal/dealer events visually on desktop and mobile with throttled network conditions.
+
 ## Automated checks
 
 - Complete-shoe integrity, shuffle, burn, discard, action locks, split sequencing, double-down validation, S17, and reshuffle tests.
 - Unique server product SKUs, positive prices/grants, and rejection of invented browser SKUs.
+- Server opening-deal completeness, hidden hole-card redaction, ordered dealer draws, settlement ordering, double-down accounting, and rejection of injected/out-of-range bets.
+- Database uniqueness constraints for sessions, request replay records, and wallet idempotency keys.
 - Full TypeScript workspace type check.
 - Blackjack web production build and API production bundle.

@@ -22,9 +22,13 @@ import type {
 import type {
   CreateChipCheckoutBody,
   CreateEconomySessionBody,
+  CreateGameSessionBody,
   EconomyProfile,
+  GameResponse,
   GetChipProducts200,
-  HealthStatus
+  HealthStatus,
+  StartGameRoundBody,
+  SubmitGameActionBody
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -86,7 +90,6 @@ export const getHealthCheckQueryKey = () => {
     `/api/healthz`
     ] as const;
     }
-
 
 export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
@@ -575,4 +578,296 @@ export const useCreateChipCheckout = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateChipCheckoutMutationOptions(options));
+    }
+
+export const getCreateGameSessionUrl = () => {
+
+
+
+
+  return `/api/games/sessions`
+}
+
+/**
+ * @summary Create an idempotent server-authoritative table session
+ */
+export const createGameSession = async (createGameSessionBody: CreateGameSessionBody, options?: Parameters<typeof customFetch>[1]): Promise<GameResponse> => {
+
+  return customFetch<GameResponse>(getCreateGameSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createGameSessionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateGameSessionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGameSession>>, TError,{data: BodyType<CreateGameSessionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createGameSession>>, TError,{data: BodyType<CreateGameSessionBody>}, TContext> => {
+
+const mutationKey = ['createGameSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createGameSession>>, {data: BodyType<CreateGameSessionBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createGameSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateGameSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createGameSession>>>
+    export type CreateGameSessionMutationBody = BodyType<CreateGameSessionBody>
+    export type CreateGameSessionMutationError = ErrorType<void>
+
+    /**
+ * @summary Create an idempotent server-authoritative table session
+ */
+export const useCreateGameSession = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createGameSession>>, TError,{data: BodyType<CreateGameSessionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createGameSession>>,
+        TError,
+        {data: BodyType<CreateGameSessionBody>},
+        TContext
+      > => {
+      return useMutation(getCreateGameSessionMutationOptions(options));
+    }
+
+export const getGetGameSessionUrl = (gameId: string,) => {
+
+
+
+
+  return `/api/games/sessions/${gameId}`
+}
+
+/**
+ * @summary Resume an owned table session without exposing the shoe
+ */
+export const getGameSession = async (gameId: string, options?: Parameters<typeof customFetch>[1]): Promise<GameResponse> => {
+
+  return customFetch<GameResponse>(getGetGameSessionUrl(gameId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGameSessionQueryKey = (gameId: string,) => {
+    return [
+    `/api/games/sessions/${gameId}`
+    ] as const;
+    }
+
+
+export const getGetGameSessionQueryOptions = <TData = Awaited<ReturnType<typeof getGameSession>>, TError = ErrorType<void>>(gameId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGameSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGameSessionQueryKey(gameId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGameSession>>> = ({ signal }) => getGameSession(gameId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: gameId !== null && gameId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGameSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGameSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getGameSession>>>
+export type GetGameSessionQueryError = ErrorType<void>
+
+
+/**
+ * @summary Resume an owned table session without exposing the shoe
+ */
+
+export function useGetGameSession<TData = Awaited<ReturnType<typeof getGameSession>>, TError = ErrorType<void>>(
+ gameId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGameSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGameSessionQueryOptions(gameId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartGameRoundUrl = (gameId: string,) => {
+
+
+
+
+  return `/api/games/${gameId}/rounds`
+}
+
+/**
+ * @summary Validate wagers, debit the ledger and deal on the server
+ */
+export const startGameRound = async (gameId: string,
+    startGameRoundBody: StartGameRoundBody, options?: Parameters<typeof customFetch>[1]): Promise<GameResponse> => {
+
+  return customFetch<GameResponse>(getStartGameRoundUrl(gameId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(startGameRoundBody)
+  }
+);}
+
+
+
+
+
+export const getStartGameRoundMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGameRound>>, TError,{gameId: string;data: BodyType<StartGameRoundBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startGameRound>>, TError,{gameId: string;data: BodyType<StartGameRoundBody>}, TContext> => {
+
+const mutationKey = ['startGameRound'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startGameRound>>, {gameId: string;data: BodyType<StartGameRoundBody>}> = (props) => {
+          const {gameId,data} = props ?? {};
+
+          return  startGameRound(gameId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartGameRoundMutationResult = NonNullable<Awaited<ReturnType<typeof startGameRound>>>
+    export type StartGameRoundMutationBody = BodyType<StartGameRoundBody>
+    export type StartGameRoundMutationError = ErrorType<void>
+
+    /**
+ * @summary Validate wagers, debit the ledger and deal on the server
+ */
+export const useStartGameRound = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startGameRound>>, TError,{gameId: string;data: BodyType<StartGameRoundBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startGameRound>>,
+        TError,
+        {gameId: string;data: BodyType<StartGameRoundBody>},
+        TContext
+      > => {
+      return useMutation(getStartGameRoundMutationOptions(options));
+    }
+
+export const getSubmitGameActionUrl = (gameId: string,) => {
+
+
+
+
+  return `/api/games/${gameId}/actions`
+}
+
+/**
+ * @summary Apply one idempotent action to the locked server game
+ */
+export const submitGameAction = async (gameId: string,
+    submitGameActionBody: SubmitGameActionBody, options?: Parameters<typeof customFetch>[1]): Promise<GameResponse> => {
+
+  return customFetch<GameResponse>(getSubmitGameActionUrl(gameId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(submitGameActionBody)
+  }
+);}
+
+
+
+
+
+export const getSubmitGameActionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitGameAction>>, TError,{gameId: string;data: BodyType<SubmitGameActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitGameAction>>, TError,{gameId: string;data: BodyType<SubmitGameActionBody>}, TContext> => {
+
+const mutationKey = ['submitGameAction'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitGameAction>>, {gameId: string;data: BodyType<SubmitGameActionBody>}> = (props) => {
+          const {gameId,data} = props ?? {};
+
+          return  submitGameAction(gameId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitGameActionMutationResult = NonNullable<Awaited<ReturnType<typeof submitGameAction>>>
+    export type SubmitGameActionMutationBody = BodyType<SubmitGameActionBody>
+    export type SubmitGameActionMutationError = ErrorType<void>
+
+    /**
+ * @summary Apply one idempotent action to the locked server game
+ */
+export const useSubmitGameAction = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitGameAction>>, TError,{gameId: string;data: BodyType<SubmitGameActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitGameAction>>,
+        TError,
+        {gameId: string;data: BodyType<SubmitGameActionBody>},
+        TContext
+      > => {
+      return useMutation(getSubmitGameActionMutationOptions(options));
     }

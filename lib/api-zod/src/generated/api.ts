@@ -16,7 +16,6 @@ export const HealthCheckResponse = zod.object({
   "status": zod.string()
 })
 
-
 /**
  * @summary Return the server-owned chip catalog
  */
@@ -94,3 +93,159 @@ export const CreateChipCheckoutBody = zod.object({
 })
 
 export const CreateChipCheckoutResponse = zod.void()
+
+
+/**
+ * @summary Create an idempotent server-authoritative table session
+ */
+export const createGameSessionBodyRequestIdMin = 8;
+export const createGameSessionBodyRequestIdMax = 100;
+
+
+
+export const CreateGameSessionBody = zod.object({
+  "tableId": zod.string(),
+  "requestId": zod.string().min(createGameSessionBodyRequestIdMin).max(createGameSessionBodyRequestIdMax)
+})
+
+export const createGameSessionResponseRoundMin = 0;
+
+export const createGameSessionResponseVersionMin = 0;
+
+export const createGameSessionResponseBalanceMin = 0;
+
+
+
+export const CreateGameSessionResponse = zod.object({
+  "sessionId": zod.string().uuid(),
+  "tableId": zod.string(),
+  "round": zod.number().int().min(createGameSessionResponseRoundMin),
+  "version": zod.number().int().min(createGameSessionResponseVersionMin),
+  "balance": zod.number().int().min(createGameSessionResponseBalanceMin),
+  "game": zod.record(zod.string(), zod.unknown()).describe('Public game state; the private shoe and unrevealed hole card are never returned.'),
+  "events": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered card and phase events for client animation.')
+})
+
+/**
+ * @summary Resume an owned table session without exposing the shoe
+ */
+export const GetGameSessionParams = zod.object({
+  "gameId": zod.coerce.string().uuid()
+})
+
+export const getGameSessionResponseRoundMin = 0;
+
+export const getGameSessionResponseVersionMin = 0;
+
+export const getGameSessionResponseBalanceMin = 0;
+
+
+
+export const GetGameSessionResponse = zod.object({
+  "sessionId": zod.string().uuid(),
+  "tableId": zod.string(),
+  "round": zod.number().int().min(getGameSessionResponseRoundMin),
+  "version": zod.number().int().min(getGameSessionResponseVersionMin),
+  "balance": zod.number().int().min(getGameSessionResponseBalanceMin),
+  "game": zod.record(zod.string(), zod.unknown()).describe('Public game state; the private shoe and unrevealed hole card are never returned.'),
+  "events": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered card and phase events for client animation.')
+})
+
+
+/**
+ * @summary Validate wagers, debit the ledger and deal on the server
+ */
+export const StartGameRoundParams = zod.object({
+  "gameId": zod.coerce.string().uuid()
+})
+
+export const startGameRoundBodyRequestIdMin = 8;
+export const startGameRoundBodyRequestIdMax = 100;
+
+export const startGameRoundBodyExpectedVersionMin = 0;
+
+export const startGameRoundBodyBetsItemSeatIdMin = 0;
+
+
+export const startGameRoundBodyBetsItemSideBetsMinOne = 0;
+
+
+
+
+export const StartGameRoundBody = zod.object({
+  "requestId": zod.string().min(startGameRoundBodyRequestIdMin).max(startGameRoundBodyRequestIdMax),
+  "expectedVersion": zod.number().int().min(startGameRoundBodyExpectedVersionMin),
+  "bets": zod.array(zod.object({
+  "seatId": zod.number().int().min(startGameRoundBodyBetsItemSeatIdMin),
+  "main": zod.number().int().min(1),
+  "sideBets": zod.record(zod.string(), zod.number().int().min(startGameRoundBodyBetsItemSideBetsMinOne)).optional()
+})).min(1)
+})
+
+export const startGameRoundResponseRoundMin = 0;
+
+export const startGameRoundResponseVersionMin = 0;
+
+export const startGameRoundResponseBalanceMin = 0;
+
+
+
+export const StartGameRoundResponse = zod.object({
+  "sessionId": zod.string().uuid(),
+  "tableId": zod.string(),
+  "round": zod.number().int().min(startGameRoundResponseRoundMin),
+  "version": zod.number().int().min(startGameRoundResponseVersionMin),
+  "balance": zod.number().int().min(startGameRoundResponseBalanceMin),
+  "game": zod.record(zod.string(), zod.unknown()).describe('Public game state; the private shoe and unrevealed hole card are never returned.'),
+  "events": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered card and phase events for client animation.')
+})
+
+
+/**
+ * @summary Apply one idempotent action to the locked server game
+ */
+export const SubmitGameActionParams = zod.object({
+  "gameId": zod.coerce.string().uuid()
+})
+
+export const submitGameActionBodyRequestIdMin = 8;
+export const submitGameActionBodyRequestIdMax = 100;
+
+export const submitGameActionBodyExpectedVersionMin = 0;
+
+export const submitGameActionBodyActionOneSeatIdMin = 0;
+
+export const submitGameActionBodyActionTwoSeatIdMin = 0;
+
+
+
+export const SubmitGameActionBody = zod.object({
+  "requestId": zod.string().min(submitGameActionBodyRequestIdMin).max(submitGameActionBodyRequestIdMax),
+  "expectedVersion": zod.number().int().min(submitGameActionBodyExpectedVersionMin),
+  "action": zod.union([zod.object({
+  "type": zod.enum(['hit', 'stand', 'double', 'split', 'surrender']),
+  "seatId": zod.number().int().min(submitGameActionBodyActionOneSeatIdMin),
+  "handId": zod.string()
+}),zod.object({
+  "type": zod.enum(['insurance', 'decline_insurance']),
+  "seatId": zod.number().int().min(submitGameActionBodyActionTwoSeatIdMin)
+})])
+})
+
+export const submitGameActionResponseRoundMin = 0;
+
+export const submitGameActionResponseVersionMin = 0;
+
+export const submitGameActionResponseBalanceMin = 0;
+
+
+
+export const SubmitGameActionResponse = zod.object({
+  "sessionId": zod.string().uuid(),
+  "tableId": zod.string(),
+  "round": zod.number().int().min(submitGameActionResponseRoundMin),
+  "version": zod.number().int().min(submitGameActionResponseVersionMin),
+  "balance": zod.number().int().min(submitGameActionResponseBalanceMin),
+  "game": zod.record(zod.string(), zod.unknown()).describe('Public game state; the private shoe and unrevealed hole card are never returned.'),
+  "events": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered card and phase events for client animation.')
+})

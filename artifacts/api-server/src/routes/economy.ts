@@ -1,6 +1,6 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { Router, type Request, type Response } from 'express';
-import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { Router } from 'express';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@workspace/db';
 import {
   dailyRewardClaimsTable,
@@ -9,33 +9,20 @@ import {
   walletTransactionsTable,
 } from '@workspace/db/schema';
 import { CHIP_PRODUCTS, DAILY_CHIPS, STARTER_CHIPS, findChipProduct } from '../economy/catalog';
+import {
+  SESSION_COOKIE,
+  SESSION_MS,
+  playerIdFromRequest,
+  requirePlayer,
+  tokenHash,
+} from '../auth/player';
 
 const router = Router();
-const SESSION_COOKIE = 'royal_ace_session';
-const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
-
-function tokenHash(token: string) {
-  return createHash('sha256').update(token).digest('hex');
-}
 
 function cleanDisplayName(value: unknown) {
   if (typeof value !== 'string') return null;
   const name = value.trim().replace(/\s+/g, ' ').slice(0, 32);
   return name.length >= 2 ? name : null;
-}
-
-async function playerIdFromRequest(req: Request) {
-  const token = req.cookies?.[SESSION_COOKIE];
-  if (typeof token !== 'string' || token.length < 20) return null;
-  const [session] = await db
-    .select({ playerId: playerSessionsTable.playerId })
-    .from(playerSessionsTable)
-    .where(and(
-      eq(playerSessionsTable.tokenHash, tokenHash(token)),
-      gt(playerSessionsTable.expiresAt, new Date()),
-    ))
-    .limit(1);
-  return session?.playerId ?? null;
 }
 
 async function walletBalance(playerId: string) {
@@ -44,15 +31,6 @@ async function walletBalance(playerId: string) {
     .from(walletTransactionsTable)
     .where(eq(walletTransactionsTable.playerId, playerId));
   return Number(row?.balance ?? 0);
-}
-
-async function requirePlayer(req: Request, res: Response) {
-  const playerId = await playerIdFromRequest(req);
-  if (!playerId) {
-    res.status(401).json({ code: 'SESSION_REQUIRED', message: 'Create or restore a player session first.' });
-    return null;
-  }
-  return playerId;
 }
 
 router.get('/economy/products', (_req, res) => {

@@ -39,17 +39,21 @@ export default function Lobby() {
   const [nameError, setNameError] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [rewardMessage, setRewardMessage] = useState('');
+  const [profileBusy, setProfileBusy] = useState(false);
   const hasVisited = economy.hasProfile;
   const bankroll = economy.state.balance;
 
-  const handleEnterCasino = () => {
+  const handleEnterCasino = async () => {
     if (!playerName.trim()) { setNameError(true); return; }
-    economy.createProfile(playerName);
-    setNameError(false);
+    if (profileBusy) return;
+    setProfileBusy(true);
+    const created = await economy.createProfile(playerName);
+    setNameError(!created);
+    setProfileBusy(false);
   };
 
-  const handleDailyReward = () => {
-    const granted = economy.claimDailyReward();
+  const handleDailyReward = async () => {
+    const granted = await economy.claimDailyReward();
     if (granted) setRewardMessage(`+${granted.toLocaleString()} chips added`);
   };
 
@@ -182,7 +186,7 @@ export default function Lobby() {
                     type="text"
                     value={playerName}
                     onChange={e => { setPlayerName(e.target.value); setNameError(false); }}
-                    onKeyDown={e => e.key === 'Enter' && handleEnterCasino()}
+                    onKeyDown={e => { if (e.key === 'Enter') void handleEnterCasino(); }}
                     placeholder="Enter your name"
                     style={{
                       width: '100%', boxSizing: 'border-box',
@@ -198,7 +202,7 @@ export default function Lobby() {
                   />
                   {nameError && (
                     <p style={{ fontSize: 11, color: '#f87171', marginTop: 5, fontFamily: 'Inter, sans-serif' }}>
-                      Please enter your name to continue.
+                      {economy.error || 'Please enter your name to continue.'}
                     </p>
                   )}
                 </div>
@@ -220,6 +224,7 @@ export default function Lobby() {
                 {/* CTA */}
                 <button
                   onClick={handleEnterCasino}
+                  disabled={profileBusy || !economy.ready}
                   style={{
                     width: '100%', padding: '15px',
                     marginTop: 4,
@@ -229,7 +234,8 @@ export default function Lobby() {
                     fontWeight: 700, letterSpacing: '0.22em',
                     textTransform: 'uppercase',
                     fontFamily: 'Inter, sans-serif',
-                    cursor: 'pointer',
+                    cursor: profileBusy || !economy.ready ? 'wait' : 'pointer',
+                    opacity: profileBusy || !economy.ready ? 0.65 : 1,
                     boxShadow: '0 4px 24px rgba(240,184,48,0.35), 0 0 0 1px rgba(255,255,255,0.08)',
                     transition: 'transform 0.12s, box-shadow 0.12s',
                   }}
@@ -242,7 +248,7 @@ export default function Lobby() {
                     e.currentTarget.style.boxShadow = '0 4px 24px rgba(240,184,48,0.35), 0 0 0 1px rgba(255,255,255,0.08)';
                   }}
                 >
-                  Enter Casino
+                  {profileBusy || !economy.ready ? 'Connecting…' : 'Enter Casino'}
                 </button>
               </div>
             </motion.div>

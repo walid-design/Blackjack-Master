@@ -11,6 +11,9 @@
   "include": ["src"],
   "references": [
     {
+      "path": "../../lib/blackjack-engine"
+    },
+    {
       "path": "../../lib/db"
     },
     {

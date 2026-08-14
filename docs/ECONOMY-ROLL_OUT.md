@@ -11,6 +11,10 @@
 - Production builds fail closed with `Checkout unavailable` unless a future provider integration replaces the disabled checkout adapter.
 - The PostgreSQL schema includes players, hashed sessions, an append-only wallet ledger, daily claims, and purchase orders.
 - The API can create guest sessions, return wallet state and history, grant an idempotent daily reward, return the product catalog, and reject checkout while payments are unconfigured.
+- Blackjack rules now live in one shared engine used by both the existing demo and the API.
+- Hosted mode keeps the shoe, dealer hole card, legal-action checks, wagers, and payouts on the server.
+- Game requests use a player-wallet lock, a game-row lock, version checks, and unique request IDs so concurrent or repeated clicks cannot charge or settle twice.
+- The client receives ordered public animation events; the private shoe and hole-card identity are never sent before reveal.
 
 ## Non-negotiable product boundary
 
@@ -26,6 +30,8 @@ Vite development mode enables the sandbox cashier. It does not ask for card deta
 
 The normal production build disables checkout. `VITE_ENABLE_DEMO_CHECKOUT` must remain unset or `false` for anything public. Never deploy a public build with the demo flag enabled.
 
+Set `VITE_SERVER_MODE=true` only for a deployment connected to the API and an applied PostgreSQL schema. Set `VITE_API_URL` to the API origin, or leave it empty when the web host proxies `/api` on the same origin.
+
 ### Future live mode
 
 Live checkout requires all of the following before it can be enabled:
@@ -36,7 +42,7 @@ Live checkout requires all of the following before it can be enabled:
 4. Webhook handling is idempotent on the provider order ID.
 5. The verified webhook and only the verified webhook inserts the positive `purchase` wallet transaction.
 6. Refund and chargeback webhooks create reversing ledger entries.
-7. The browser game is replaced by a server-authoritative game session for wagers and payouts.
+7. Server-authoritative gameplay is enabled in the deployed web build and has passed staging abuse tests against the hosted database.
 8. Rate limits, monitoring, support tooling, spend controls, terms, privacy policy, age gating, and country availability are approved for launch.
 
 The current checkout route intentionally returns `503 PAYMENTS_NOT_CONFIGURED`. Do not change that to a successful response until the gates above are complete.
@@ -48,6 +54,7 @@ The current checkout route intentionally returns `503 PAYMENTS_NOT_CONFIGURED`. 
 3. Apply the schema with `pnpm --filter @workspace/db run push` in a development database. Use reviewed migrations for production.
 4. Start the API with `PORT=5000 pnpm --filter @workspace/api-server run dev`.
 5. Build the web app with `PORT=4173 BASE_PATH=/ pnpm --filter @workspace/blackjack run build`.
+6. For hosted staging, set `VITE_SERVER_MODE=true` and `VITE_API_URL` before building the web app.
 
 ## API map
 
@@ -57,8 +64,14 @@ The current checkout route intentionally returns `503 PAYMENTS_NOT_CONFIGURED`. 
 - `GET /api/economy/products` — server-owned catalog and payment availability.
 - `GET /api/economy/transactions` — latest 50 ledger entries.
 - `POST /api/economy/checkout` — intentionally disabled until a provider is configured.
+- `POST /api/games/sessions` — create or idempotently restore a server-owned table session.
+- `GET /api/games/sessions/:gameId` — resume public state without exposing the shoe.
+- `POST /api/games/:gameId/rounds` — validate/debit bets and deal on the server.
+- `POST /api/games/:gameId/actions` — apply versioned, idempotent actions and ledger changes.
 
 ## Important next external decisions
+
+The next implementation checkpoint is hosted PostgreSQL plus a private staging deployment, followed by the server-mode browser abuse checklist.
 
 - Choose a company/legal entity and initial launch countries.
 - Obtain written approval from a payment provider for non-redeemable social-casino chips.

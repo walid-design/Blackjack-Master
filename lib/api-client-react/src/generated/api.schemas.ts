@@ -25,12 +25,54 @@ export type EconomyProfilePlayer = {
   id: string;
   displayName: string;
 };
-
 export interface EconomyProfile {
   player: EconomyProfilePlayer;
   /** @minimum 0 */
   balance: number;
   dailyRewardAvailable: boolean;
+}
+
+export type SeatBetSideBets = {[key: string]: number};
+
+export interface SeatBet {
+  /** @minimum 0 */
+  seatId: number;
+  /** @minimum 1 */
+  main: number;
+  sideBets?: SeatBetSideBets;
+}
+
+export type GameAction = {
+  type: 'hit' | 'stand' | 'double' | 'split' | 'surrender';
+  /** @minimum 0 */
+  seatId: number;
+  handId: string;
+} | {
+  type: 'insurance' | 'decline_insurance';
+  /** @minimum 0 */
+  seatId: number;
+};
+
+/**
+ * Public game state; the private shoe and unrevealed hole card are never returned.
+ */
+export type GameResponseGame = { [key: string]: unknown };
+
+export type GameResponseEventsItem = { [key: string]: unknown };
+
+export interface GameResponse {
+  sessionId: string;
+  tableId: string;
+  /** @minimum 0 */
+  round: number;
+  /** @minimum 0 */
+  version: number;
+  /** @minimum 0 */
+  balance: number;
+  /** Public game state; the private shoe and unrevealed hole card are never returned. */
+  game: GameResponseGame;
+  /** Ordered card and phase events for client animation. */
+  events: GameResponseEventsItem[];
 }
 
 export type GetChipProducts200 = {
@@ -50,4 +92,36 @@ export type CreateEconomySessionBody = {
 
 export type CreateChipCheckoutBody = {
   sku: string;
+};
+
+export type CreateGameSessionBody = {
+  tableId: string;
+  /**
+     * @minLength 8
+     * @maxLength 100
+     */
+  requestId: string;
+};
+
+export type StartGameRoundBody = {
+  /**
+     * @minLength 8
+     * @maxLength 100
+     */
+  requestId: string;
+  /** @minimum 0 */
+  expectedVersion: number;
+  /** @minItems 1 */
+  bets: SeatBet[];
+};
+
+export type SubmitGameActionBody = {
+  /**
+     * @minLength 8
+     * @maxLength 100
+     */
+  requestId: string;
+  /** @minimum 0 */
+  expectedVersion: number;
+  action: GameAction;
 };

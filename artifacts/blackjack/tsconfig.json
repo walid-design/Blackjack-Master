@@ -16,6 +16,9 @@
   },
   "references": [
     {
+      "path": "../../lib/blackjack-engine"
+    },
+    {
       "path": "../../lib/api-client-react"
     }
   ]

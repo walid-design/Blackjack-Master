@@ -28,6 +28,12 @@ export const purchaseStatus = pgEnum('purchase_status', [
   'refunded',
 ]);
 
+export const gameSessionStatus = pgEnum('game_session_status', [
+  'ready',
+  'active',
+  'settled',
+]);
+
 export const playersTable = pgTable('players', {
   id: uuid('id').primaryKey().defaultRandom(),
   displayName: text('display_name').notNull(),
@@ -87,6 +93,37 @@ export const purchasesTable = pgTable('purchases', {
   index('purchases_player_created_idx').on(table.playerId, table.createdAt),
 ]);
 
+export const gameSessionsTable = pgTable('game_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  playerId: uuid('player_id').notNull().references(() => playersTable.id, { onDelete: 'restrict' }),
+  tableId: text('table_id').notNull(),
+  clientRequestId: text('client_request_id').notNull(),
+  state: jsonb('state').$type<Record<string, unknown>>().notNull(),
+  status: gameSessionStatus('status').notNull().default('ready'),
+  currentRound: integer('current_round').notNull().default(0),
+  roundWager: integer('round_wager').notNull().default(0),
+  version: integer('version').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex('game_sessions_player_request_unique').on(table.playerId, table.clientRequestId),
+  index('game_sessions_player_updated_idx').on(table.playerId, table.updatedAt),
+]);
+
+export const gameRequestsTable = pgTable('game_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  gameSessionId: uuid('game_session_id').notNull().references(() => gameSessionsTable.id, { onDelete: 'cascade' }),
+  playerId: uuid('player_id').notNull().references(() => playersTable.id, { onDelete: 'restrict' }),
+  requestId: text('request_id').notNull(),
+  action: text('action').notNull(),
+  response: jsonb('response').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex('game_requests_session_request_unique').on(table.gameSessionId, table.requestId),
+  index('game_requests_player_created_idx').on(table.playerId, table.createdAt),
+]);
+
 export type Player = typeof playersTable.$inferSelect;
 export type WalletTransaction = typeof walletTransactionsTable.$inferSelect;
 export type Purchase = typeof purchasesTable.$inferSelect;
+export type GameSession = typeof gameSessionsTable.$inferSelect;

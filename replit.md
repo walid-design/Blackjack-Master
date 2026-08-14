@@ -13,6 +13,8 @@ A social-blackjack web game with realistic shoe dealing, multiple casino table t
 
 Required production environment:
 
+Hosted web builds also use `VITE_SERVER_MODE=true` plus `VITE_API_URL` (or a same-origin `/api` proxy). Leave hosted mode off unless the API and PostgreSQL schema are running.
+
 - `DATABASE_URL` — PostgreSQL connection string.
 - `WEB_ORIGIN` — exact HTTPS frontend origin; required in production.
 - `PORT` — process port.
@@ -25,7 +27,7 @@ Never enable `VITE_ENABLE_DEMO_CHECKOUT` in a public build.
 - Web: React 19, Vite, TypeScript, Tailwind CSS, Framer Motion.
 - API: Express 5, signed-cookie-style opaque guest sessions, Zod-ready API workspace.
 - Database: PostgreSQL and Drizzle ORM.
-- Game rules and state: `artifacts/blackjack/src/lib`.
+- Shared game rules and state: `lib/blackjack-engine/src`.
 - Economy UI/state: `artifacts/blackjack/src/economy/EconomyContext.tsx`.
 - Chip shop: `artifacts/blackjack/src/components/ShopModal.tsx`.
 - Economy API: `artifacts/api-server/src/routes/economy.ts`.
@@ -35,6 +37,8 @@ Never enable `VITE_ENABLE_DEMO_CHECKOUT` in a public build.
 
 ## Architecture decisions
 
+- Hosted game requests lock both the owned game row and the player wallet, check a monotonically increasing version, and store the response under a unique client request ID.
+- Only the server can shuffle, draw, reveal, validate actions, debit wagers, or credit payouts in hosted mode.
 - A wallet is an append-only transaction ledger; the displayed balance is the sum of its entries.
 - Server-owned SKUs determine price and chip grants. Browser-provided chip amounts are never trusted.
 - Starter and daily grants use unique idempotency keys and database uniqueness constraints.
@@ -49,4 +53,6 @@ Chips have no cash value and cannot be withdrawn, transferred, resold, exchanged
 
 ## Known go-live gate
 
-Do not accept real payments yet. The payment provider and server-authoritative game-session layer must be completed before purchased chips are enabled. See `docs/ECONOMY-ROLL_OUT.md`.
+Server-authoritative gameplay now exists in code, but hosted-database staging, account recovery, abuse/rate-limit testing, provider approval, and signed payment webhooks are still required.
+
+Do not accept real payments yet. See `docs/ECONOMY-ROLL_OUT.md` for the remaining launch gates.

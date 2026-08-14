@@ -110,6 +110,112 @@ paths:
         "503": { description: Payments are not configured }
         "400": { description: Invalid SKU }
         "401": { description: Session required }
+  /games/sessions:
+    post:
+      operationId: createGameSession
+      tags: [games]
+      summary: Create an idempotent server-authoritative table session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tableId, requestId]
+              properties:
+                tableId: { type: string }
+                requestId: { type: string, minLength: 8, maxLength: 100 }
+      responses:
+        "201":
+          description: Table session created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameResponse" }
+        "200":
+          description: An idempotent retry returned the existing session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameResponse" }
+        "401": { description: Session required }
+  /games/sessions/{gameId}:
+    get:
+      operationId: getGameSession
+      tags: [games]
+      summary: Resume an owned table session without exposing the shoe
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current public game state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameResponse" }
+        "404": { description: Game session not found }
+        "401": { description: Session required }
+  /games/{gameId}/rounds:
+    post:
+      operationId: startGameRound
+      tags: [games]
+      summary: Validate wagers, debit the ledger and deal on the server
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedVersion, bets]
+              properties:
+                requestId: { type: string, minLength: 8, maxLength: 100 }
+                expectedVersion: { type: integer, minimum: 0 }
+                bets:
+                  type: array
+                  minItems: 1
+                  items: { $ref: "#/components/schemas/SeatBet" }
+      responses:
+        "200":
+          description: Server deal and ordered animation events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameResponse" }
+        "409": { description: "Stale version, active round or insufficient chips" }
+        "401": { description: Session required }
+  /games/{gameId}/actions:
+    post:
+      operationId: submitGameAction
+      tags: [games]
+      summary: Apply one idempotent action to the locked server game
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, expectedVersion, action]
+              properties:
+                requestId: { type: string, minLength: 8, maxLength: 100 }
+                expectedVersion: { type: integer, minimum: 0 }
+                action: { $ref: "#/components/schemas/GameAction" }
+      responses:
+        "200":
+          description: Updated public state and ordered animation events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GameResponse" }
+        "409": { description: "Stale version, duplicate conflict or illegal action" }
+        "401": { description: Session required }
 components:
   schemas:
     HealthStatus:
@@ -141,4 +247,45 @@ components:
             displayName: { type: string }
         balance: { type: integer, minimum: 0 }
         dailyRewardAvailable: { type: boolean }
+    SeatBet:
+      type: object
+      required: [seatId, main]
+      properties:
+        seatId: { type: integer, minimum: 0 }
+        main: { type: integer, minimum: 1 }
+        sideBets:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+    GameAction:
+      oneOf:
+        - type: object
+          required: [type, seatId, handId]
+          properties:
+            type: { type: string, enum: [hit, stand, double, split, surrender] }
+            seatId: { type: integer, minimum: 0 }
+            handId: { type: string }
+        - type: object
+          required: [type, seatId]
+          properties:
+            type: { type: string, enum: [insurance, decline_insurance] }
+            seatId: { type: integer, minimum: 0 }
+    GameResponse:
+      type: object
+      required: [sessionId, tableId, round, version, balance, game, events]
+      properties:
+        sessionId: { type: string, format: uuid }
+        tableId: { type: string }
+        round: { type: integer, minimum: 0 }
+        version: { type: integer, minimum: 0 }
+        balance: { type: integer, minimum: 0 }
+        game:
+          type: object
+          description: Public game state; the private shoe and unrevealed hole card are never returned.
+          additionalProperties: true
+        events:
+          type: array
+          description: Ordered card and phase events for client animation.
+          items:
+            type: object
+            additionalProperties: true
 

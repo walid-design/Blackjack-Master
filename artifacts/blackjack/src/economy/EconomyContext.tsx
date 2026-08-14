@@ -53,16 +53,22 @@ interface EconomyState {
 interface EconomyContextValue {
   state: EconomyState;
   hasProfile: boolean;
+  ready: boolean;
+  serverMode: boolean;
+  error: string;
   dailyRewardAvailable: boolean;
   demoCheckoutEnabled: boolean;
-  createProfile: (displayName: string) => void;
-  claimDailyReward: () => number;
+  createProfile: (displayName: string) => Promise<boolean>;
+  claimDailyReward: () => Promise<number>;
   syncGameplayBalance: (balance: number) => void;
+  setVerifiedBalance: (balance: number) => void;
   recordCompletedRound: () => void;
   completeDemoPurchase: (sku: string) => number;
 }
 
 const STORAGE_KEY = 'royal_ace_economy_v1';
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
+const SERVER_MODE = import.meta.env.VITE_SERVER_MODE === 'true';
 const EMPTY_STATE: EconomyState = {
   version: 1,
   profileId: null,
@@ -135,8 +141,45 @@ function appendLedger(state: EconomyState, entry: LedgerEntry): EconomyState {
 }
 
 export function EconomyProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<EconomyState>(readInitialState);
-  const demoCheckoutEnabled = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_CHECKOUT === 'true';
+  const [state, setState] = useState<EconomyState>(() => SERVER_MODE ? EMPTY_STATE : readInitialState());
+  const [ready, setReady] = useState(!SERVER_MODE);
+  const [error, setError] = useState('');
+  const demoCheckoutEnabled = !SERVER_MODE && (import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO_CHECKOUT === 'true');
+
+  const serverRequest = useCallback(async (path: string, init: RequestInit = {}) => {
+    const response = await fetch(`${API_BASE}/api${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...init.headers },
+    });
+    const body = await response.json().catch(() => null) as Record<string, any> | null;
+    if (!response.ok) {
+      const failure = new Error(typeof body?.message === 'string' ? body.message : `Server error ${response.status}`);
+      (failure as Error & { status?: number }).status = response.status;
+      throw failure;
+    }
+    return body ?? {};
+  }, []);
+
+  useEffect(() => {
+    if (!SERVER_MODE) return;
+    let cancelled = false;
+    void serverRequest('/economy/me').then(body => {
+      if (cancelled) return;
+      setState(current => ({
+        ...current,
+        profileId: body.player.id,
+        displayName: body.player.displayName,
+        balance: Math.max(0, Math.floor(body.balance)),
+        dailyRewardDate: body.dailyRewardAvailable ? null : todayKey(),
+      }));
+    }).catch(reason => {
+      if (!cancelled && (reason as Error & { status?: number }).status !== 401) {
+        setError(reason instanceof Error ? reason.message : 'Could not restore the player session.');
+      }
+    }).finally(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+  }, [serverRequest]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -144,9 +187,28 @@ export function EconomyProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('bj_bankroll', String(state.balance));
   }, [state]);
 
-  const createProfile = useCallback((displayName: string) => {
+  const createProfile = useCallback(async (displayName: string) => {
     const cleanName = displayName.trim().slice(0, 32);
-    if (!cleanName) return;
+    if (!cleanName) return false;
+    if (SERVER_MODE) {
+      try {
+        setError('');
+        const body = await serverRequest('/economy/session', {
+          method: 'POST',
+          body: JSON.stringify({ displayName: cleanName }),
+        });
+        setState(current => ({
+          ...current,
+          profileId: body.player.id,
+          displayName: body.player.displayName,
+          balance: Math.max(0, Math.floor(body.balance)),
+        }));
+        return true;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not create the player profile.');
+        return false;
+      }
+    }
     setState(current => {
       if (current.profileId) return { ...current, displayName: cleanName };
       return appendLedger({
@@ -161,11 +223,30 @@ export function EconomyProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
       });
     });
-  }, []);
+    return true;
+  }, [serverRequest]);
 
-  const claimDailyReward = useCallback(() => {
+  const claimDailyReward = useCallback(async () => {
     const today = todayKey();
     if (!state.profileId || state.dailyRewardDate === today) return 0;
+    if (SERVER_MODE) {
+      try {
+        setError('');
+        const body = await serverRequest('/economy/daily-reward', { method: 'POST' });
+        const granted = Math.max(0, Math.floor(body.granted));
+        setState(current => ({
+          ...current,
+          balance: Math.max(0, Math.floor(body.balance)),
+          dailyRewardDate: today,
+          lastDailyDate: today,
+          dailyStreak: current.lastDailyDate === yesterdayKey() ? current.dailyStreak + 1 : 1,
+        }));
+        return granted;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Could not claim the reward.');
+        return 0;
+      }
+    }
     setState(current => {
       if (!current.profileId || current.dailyRewardDate === today) return current;
       const streak = current.lastDailyDate === yesterdayKey() ? current.dailyStreak + 1 : 1;
@@ -184,9 +265,10 @@ export function EconomyProvider({ children }: { children: ReactNode }) {
       });
     });
     return DAILY_CHIPS;
-  }, [state.profileId, state.dailyRewardDate]);
+  }, [state.profileId, state.dailyRewardDate, serverRequest]);
 
   const syncGameplayBalance = useCallback((balance: number) => {
+    if (SERVER_MODE) return;
     const safeBalance = Math.max(0, Math.floor(balance));
     setState(current => {
       const delta = safeBalance - current.balance;
@@ -198,6 +280,12 @@ export function EconomyProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
       });
     });
+  }, []);
+
+  const setVerifiedBalance = useCallback((balance: number) => {
+    if (!SERVER_MODE) return;
+    const safeBalance = Math.max(0, Math.floor(balance));
+    setState(current => current.profileId ? { ...current, balance: safeBalance } : current);
   }, []);
 
   const recordCompletedRound = useCallback(() => {
@@ -229,14 +317,18 @@ export function EconomyProvider({ children }: { children: ReactNode }) {
   const value = useMemo<EconomyContextValue>(() => ({
     state,
     hasProfile: Boolean(state.profileId),
+    ready,
+    serverMode: SERVER_MODE,
+    error,
     dailyRewardAvailable: Boolean(state.profileId) && state.dailyRewardDate !== todayKey(),
     demoCheckoutEnabled,
     createProfile,
     claimDailyReward,
     syncGameplayBalance,
+    setVerifiedBalance,
     recordCompletedRound,
     completeDemoPurchase,
-  }), [state, demoCheckoutEnabled, createProfile, claimDailyReward, syncGameplayBalance, recordCompletedRound, completeDemoPurchase]);
+  }), [state, ready, error, demoCheckoutEnabled, createProfile, claimDailyReward, syncGameplayBalance, setVerifiedBalance, recordCompletedRound, completeDemoPurchase]);
 
   return <EconomyContext.Provider value={value}>{children}</EconomyContext.Provider>;
 }
