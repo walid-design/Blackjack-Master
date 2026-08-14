@@ -10,6 +10,8 @@ export interface GameState {
   activeSeatIndex: number;
   cutCardIndex: number;
   needsShuffle: boolean;
+  /** Identifies the active initial-deal sequence so stale timed actions are ignored. */
+  dealSequence: number;
   /** True while a turn-ending HIT/DOUBLE card is still flying to the hand. */
   pendingTurnAdvance?: boolean;
   bankroll: number;
@@ -32,8 +34,8 @@ export type GameAction =
   | { type: 'PLACE_SIDE_BET'; seatId: number; betType: keyof SideBets; amount: number }
   | { type: 'CLEAR_BETS' }
   | { type: 'DEAL' }
-  | { type: 'CARD_DEALT'; to: 'player' | 'dealer'; seatId?: number }
-  | { type: 'CHECK_DEALER_BJ' }
+  | { type: 'CARD_DEALT'; to: 'player' | 'dealer'; seatId?: number; dealSequence: number }
+  | { type: 'CHECK_DEALER_BJ'; dealSequence: number }
   | { type: 'START_PLAYER_TURN' }
   | { type: 'HIT' }
   | { type: 'STAND' }

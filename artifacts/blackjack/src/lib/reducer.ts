@@ -25,6 +25,7 @@ export function createInitialState(table: TableConfig, initialBankroll: number):
     activeSeatIndex: -1,
     cutCardIndex: Math.floor(shoe.length * 0.25),
     needsShuffle: false,
+    dealSequence: 0,
     bankroll: initialBankroll,
     bettingSeatId: undefined,
   };
@@ -38,6 +39,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
   switch (action.type) {
     // ── Seat management ──────────────────────────────────────────────────────
     case 'SIT': {
+      if (state.phase !== 'SEAT_SELECTION' && state.phase !== 'BETTING') return state;
       const s = { ...state, seats: [...state.seats] };
       s.seats[action.seatId] = { ...s.seats[action.seatId], isActive: true };
       if (s.phase === 'SEAT_SELECTION') {
@@ -47,6 +49,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return s;
     }
     case 'LEAVE': {
+      if (state.phase !== 'SEAT_SELECTION' && state.phase !== 'BETTING') return state;
       const s = { ...state, seats: [...state.seats] };
       const seat = s.seats[action.seatId];
       // Return un-deducted bet to bankroll
@@ -58,12 +61,14 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return s;
     }
     case 'SELECT_BET_SEAT': {
+      if (state.phase !== 'SEAT_SELECTION' && state.phase !== 'BETTING') return state;
       return { ...state, bettingSeatId: action.seatId };
     }
 
     // ── Betting ──────────────────────────────────────────────────────────────
     case 'PLACE_BET': {
       const { seatId, amount } = action;
+      if (state.phase !== 'BETTING' || !state.seats[seatId]?.isActive) return state;
       if (state.bankroll < amount) return state;
       const s = { ...state, seats: [...state.seats], bankroll: state.bankroll - amount };
       const seat = { ...s.seats[seatId] };
@@ -81,6 +86,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
     }
     case 'PLACE_SIDE_BET': {
       const { seatId, betType, amount } = action;
+      if (state.phase !== 'BETTING' || !state.seats[seatId]?.isActive) return state;
       if (state.bankroll < amount) return state;
       const s = { ...state, seats: [...state.seats], bankroll: state.bankroll - amount };
       const seat = { ...s.seats[seatId], sideBets: { ...s.seats[seatId].sideBets } };
@@ -92,6 +98,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return state; // handled by CLEAR_BETS
     }
     case 'CLEAR_BETS': {
+      if (state.phase !== 'BETTING') return state;
       let returned = 0;
       const seats = state.seats.map(seat => {
         if (!seat.isActive) return seat;
@@ -104,6 +111,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
 
     // ── Dealing ──────────────────────────────────────────────────────────────
     case 'REPEAT_BET': {
+      if (state.phase !== 'BETTING') return state;
       if (!state.lastBets) return state;
       const rb = state.lastBets;
       // Calculate total cost
@@ -139,6 +147,10 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
     }
 
     case 'DEAL': {
+      // A fading betting panel may still receive a rapid second click. Never
+      // let that duplicate DEAL reset cards that the active sequence just drew.
+      if (state.phase !== 'BETTING') return state;
+      if (!state.seats.some(seat => seat.isActive && (seat.hands[0]?.bet ?? 0) > 0)) return state;
       // Snapshot bets for Repeat Bet before dealing
       const lastBets: GameState['lastBets'] = { main: {}, side: {} };
       state.seats.forEach((seat, i) => {
@@ -153,6 +165,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         ...state,
         lastBets,
         phase: 'DEALING',
+        dealSequence: state.dealSequence + 1,
         dealerCards: [],
         dealerStatus: 'playing',
         activeSeatIndex: -1,
@@ -177,6 +190,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       };
     }
     case 'CARD_DEALT': {
+      if (state.phase !== 'DEALING' || action.dealSequence !== state.dealSequence) return state;
       const s = { ...state, shoe: [...state.shoe] };
       const card = s.shoe.pop();
       if (!card) return s;
@@ -214,6 +228,11 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
 
     // ── Dealer BJ check / insurance ──────────────────────────────────────────
     case 'CHECK_DEALER_BJ': {
+      if (state.phase !== 'DEALING' || action.dealSequence !== state.dealSequence) return state;
+      const incompletePlayerHand = state.seats.some(
+        seat => seat.isActive && seat.hands.length > 0 && seat.hands[0].cards.length !== 2,
+      );
+      if (state.dealerCards.length !== 2 || incompletePlayerHand) return state;
       const s = { ...state };
       const upcard = s.dealerCards[0];
       if (upcard?.rank === 'A') {

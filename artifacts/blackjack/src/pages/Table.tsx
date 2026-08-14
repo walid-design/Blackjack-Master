@@ -163,6 +163,13 @@ export default function Table() {
   const [selectedChip, setSelectedChip] = useState(25);
   const [showPayouts, setShowPayouts] = useState(false);
   const [collectingCards, setCollectingCards] = useState(false);
+  const dealClickLockedRef = useRef(false);
+
+  // The lock is synchronous (a ref), so even two clicks inside one browser
+  // frame cannot enqueue two deals. It resets only when a new betting round opens.
+  useEffect(() => {
+    if (state.phase === 'BETTING') dealClickLockedRef.current = false;
+  }, [state.phase]);
 
   // Track previous bankroll for delta animation
   const prevBankrollRef = useRef(state.bankroll);
@@ -183,36 +190,49 @@ export default function Table() {
     if (state.phase !== 'SETTLEMENT' || !(state as any).settled) historyRecordedRef.current = false;
   }, [state.phase, state.dealerCards, state.dealerStatus, (state as any).settled]);
 
-  // DEALING: right-to-left (reverse seat order, 550ms per card)
+  // DEALING: right-to-left. Every timed action is tagged with this deal's
+  // sequence number, and cleanup cancels the old loop if the phase changes.
   const dealingRef = useRef(false);
   useEffect(() => {
-    if (state.phase === 'DEALING') {
-      if (dealingRef.current) return;
-      dealingRef.current = true;
-      // Right to left: highest index first
-      const activeSeats = (state.seats as Seat[])
-        .filter(s => s.isActive && s.hands.length > 0)
-        .slice()
-        .reverse();
-      (async () => {
-        for (const seat of activeSeats) {
-          dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-          await sleep(720);
-        }
-        dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-        await sleep(720);
-        for (const seat of activeSeats) {
-          dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id });
-          await sleep(720);
-        }
-        dispatch({ type: 'CARD_DEALT', to: 'dealer' });
-        await sleep(950);
-        dispatch({ type: 'CHECK_DEALER_BJ' });
-      })();
-    } else {
+    if (state.phase !== 'DEALING') {
       dealingRef.current = false;
+      return undefined;
     }
-  }, [state.phase]);
+    if (dealingRef.current) return undefined;
+
+    dealingRef.current = true;
+    let cancelled = false;
+    const dealSequence = state.dealSequence;
+    const activeSeats = (state.seats as Seat[])
+      .filter(s => s.isActive && s.hands.length > 0)
+      .slice()
+      .reverse();
+
+    (async () => {
+      for (const seat of activeSeats) {
+        if (cancelled) return;
+        dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id, dealSequence });
+        await sleep(720);
+      }
+      if (cancelled) return;
+      dispatch({ type: 'CARD_DEALT', to: 'dealer', dealSequence });
+      await sleep(720);
+      for (const seat of activeSeats) {
+        if (cancelled) return;
+        dispatch({ type: 'CARD_DEALT', to: 'player', seatId: seat.id, dealSequence });
+        await sleep(720);
+      }
+      if (cancelled) return;
+      dispatch({ type: 'CARD_DEALT', to: 'dealer', dealSequence });
+      await sleep(950);
+      if (!cancelled) dispatch({ type: 'CHECK_DEALER_BJ', dealSequence });
+    })();
+
+    return () => {
+      cancelled = true;
+      dealingRef.current = false;
+    };
+  }, [state.phase, state.dealSequence]);
 
   // SPLIT_DEALING: deal one card to each split hand 550ms apart
   const splitDealingRef = useRef(false);
@@ -266,6 +286,11 @@ export default function Table() {
 
   const canDeal = (state.seats as Seat[]).some(s => s.isActive && (s.hands[0]?.bet ?? 0) >= tableConfig.minBet);
   const anyActive = (state.seats as Seat[]).some(s => s.isActive);
+  const handleDeal = () => {
+    if (dealClickLockedRef.current || state.phase !== 'BETTING' || !canDeal) return;
+    dealClickLockedRef.current = true;
+    dispatch({ type: 'DEAL' });
+  };
 
   return (
     <div style={{
@@ -472,7 +497,7 @@ export default function Table() {
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
+              exit={{ opacity: 0, y: 10, pointerEvents: 'none' }}
               transition={{ duration: 0.25 }}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -540,7 +565,7 @@ export default function Table() {
                   <motion.button
                     data-testid="button-deal"
                     whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                    onClick={() => dispatch({ type: 'DEAL' })}
+                    onClick={handleDeal}
                     style={{
                       padding: '9px 32px', fontSize: 11, fontWeight: 800,
                       letterSpacing: '0.24em', textTransform: 'uppercase',
@@ -656,6 +681,7 @@ export default function Table() {
         selectedChip={selectedChip}
         setSelectedChip={setSelectedChip}
         canDeal={canDeal}
+        onDeal={handleDeal}
         anyActive={anyActive}
         isMobile={isMobile}
       />
@@ -1879,10 +1905,10 @@ function SideBetSheet({ state, dispatch, config, selectedChip }: {
 // Control Bar (simplified — chip tray + deal/next-round only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, anyActive, isMobile = false }: {
+function ControlBar({ state, dispatch, playerName, config, selectedChip, setSelectedChip, canDeal, onDeal, anyActive, isMobile = false }: {
   state: any; dispatch: any; playerName: string; config: TableConfig;
   selectedChip: number; setSelectedChip: (n: number) => void;
-  canDeal: boolean; anyActive: boolean; isMobile?: boolean;
+  canDeal: boolean; onDeal: () => void; anyActive: boolean; isMobile?: boolean;
 }) {
   const isBettingPhase = state.phase === 'BETTING' || state.phase === 'SEAT_SELECTION';
   // Mobile chip sizes: slightly smaller to fit 5 chips in a row
@@ -1924,7 +1950,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
                 )}
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button data-testid="button-clear-bets" onClick={() => dispatch({ type: 'CLEAR_BETS' })} style={{ ...ghostBtn, padding: '6px 12px', fontSize: 10 }}>Clear</button>
-                  {canDeal && <button data-testid="button-deal" onClick={() => dispatch({ type: 'DEAL' })} style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}>Deal</button>}
+                  {canDeal && <button data-testid="button-deal" onClick={onDeal} style={{ ...goldBtn, padding: '6px 18px', fontSize: 10 }}>Deal</button>}
                 </div>
               </div>
             )}
