@@ -912,8 +912,29 @@ function checkAllDone(state: GameState): GameState {
   const anyPlaying = state.seats.some(
     seat => seat.isActive && seat.hands.some(h => h.status === 'playing')
   );
-  if (!anyPlaying) return { ...state, phase: 'DEALER_TURN' };
+  if (!anyPlaying) return finishPlayerTurns(state);
   return state;
+}
+
+/**
+ * The dealer only completes their hand when a main wager still needs to be
+ * compared with it, or when an active Bust It wager depends on the dealer's
+ * final cards. Naturals, busts, and surrenders can otherwise settle at once.
+ */
+function finishPlayerTurns(state: GameState): GameState {
+  const hasDealerDependentSideBet = state.seats.some(
+    seat => seat.isActive && (seat.sideBets.bustIt ?? 0) > 0,
+  );
+  const hasMainHandToCompare = state.seats.some(
+    seat => seat.isActive && seat.hands.some(
+      hand => hand.status === 'stood' && !(isBlackjack(hand.cards) && !hand.isSplit),
+    ),
+  );
+
+  if (hasDealerDependentSideBet || hasMainHandToCompare) {
+    return { ...state, phase: 'DEALER_TURN' };
+  }
+  return { ...state, phase: 'SETTLEMENT', dealerStatus: 'stood' };
 }
 
 function moveToNextHand(state: GameState): GameState {
@@ -951,7 +972,7 @@ function moveToNextHand(state: GameState): GameState {
     nextSeat--;
   }
 
-  // All hands done → dealer
-  s.phase = 'DEALER_TURN';
-  return s;
+  // All hands are resolved. Only play out the dealer hand when a remaining
+  // wager actually depends on its final value.
+  return finishPlayerTurns(s);
 }

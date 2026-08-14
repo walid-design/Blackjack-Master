@@ -53,6 +53,29 @@ test('server deals a complete opening hand and hides the dealer hole card', () =
   assert.equal(result.state.cardIntegrity.valid, true);
 });
 
+test('server pays a natural blackjack without drawing out the dealer hand', () => {
+  const state = withDrawOrder(createServerGame('classic', 1_000), [
+    { rank: 'A', suit: 'clubs' },
+    { rank: '6', suit: 'hearts' },
+    { rank: 'K', suit: 'diamonds' },
+    { rank: '9', suit: 'spades' },
+    { rank: '10', suit: 'clubs' },
+  ]);
+
+  const result = startServerRound(state, [{ seatId: 2, main: 10 }], 1_000);
+  const dealerCardsDealt = result.events.filter(
+    event => event.type === 'card_dealt' && event.to === 'dealer',
+  );
+
+  assert.equal(result.state.phase, 'SETTLEMENT');
+  assert.equal(result.state.settled, true);
+  assert.equal(result.state.dealerCards.length, 2);
+  assert.equal(dealerCardsDealt.length, 2);
+  assert.equal(result.events.some(event => event.type === 'dealer_hole_revealed'), false);
+  assert.equal(result.state.seats[2].hands[0].result, 'blackjack_win');
+  assert.equal(result.state.bankroll, 1_015);
+});
+
 test('dealer draws one card at a time and settlement is the final game event', () => {
   const state = withDrawOrder(createServerGame('classic', 1_000), [
     { rank: '10', suit: 'clubs' },

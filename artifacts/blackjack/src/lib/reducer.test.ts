@@ -96,6 +96,59 @@ test('locks repeated hits until the flying card lands', () => {
   assert.equal(state.cardIntegrity.valid, true);
 });
 
+test('settles a lone natural blackjack without playing out the dealer hand', () => {
+  let state = stateWithHand(['A', 'K'], ['6', '9']);
+  state = { ...state, phase: 'DEALING' };
+  const shoeLength = state.shoe.length;
+
+  state = gameReducer(state, { type: 'CHECK_DEALER_BJ', dealSequence: state.dealSequence });
+
+  assert.equal(state.phase, 'SETTLEMENT');
+  assert.equal(state.dealerStatus, 'stood');
+  assert.equal(state.dealerCards.length, 2);
+  assert.equal(state.shoe.length, shoeLength);
+  assert.equal(state.seats[0].hands[0].status, 'stood');
+
+  state = gameReducer(state, { type: 'PERFORM_SETTLEMENT' });
+  assert.equal(state.seats[0].hands[0].result, 'blackjack_win');
+});
+
+test('skips dealer play when every main hand has already busted', () => {
+  let state = stateWithHand(['10', '6'], ['6', '9']);
+  const shoe = [...state.shoe];
+  const bustCard = takeCard(shoe, '10');
+  state = { ...state, shoe: [...shoe, bustCard] };
+  const hand = state.seats[0].hands[0];
+
+  state = gameReducer(state, { type: 'HIT', seatId: 0, handId: hand.id });
+  const landedCard = state.seats[0].hands[0].cards.at(-1)!;
+  state = gameReducer(state, {
+    type: 'PLAYER_CARD_LANDED',
+    seatId: 0,
+    handId: hand.id,
+    cardId: landedCard.id,
+  });
+
+  assert.equal(state.seats[0].hands[0].status, 'busted');
+  assert.equal(state.phase, 'SETTLEMENT');
+  assert.equal(state.dealerCards.length, 2);
+});
+
+test('still plays the dealer hand when a Bust It wager needs the outcome', () => {
+  let state = stateWithHand(['A', 'K'], ['6', '9']);
+  state = {
+    ...state,
+    phase: 'DEALING',
+    seats: state.seats.map((seat, index) => index === 0
+      ? { ...seat, sideBets: { bustIt: 5 } }
+      : seat),
+  };
+
+  state = gameReducer(state, { type: 'CHECK_DEALER_BJ', dealSequence: state.dealSequence });
+
+  assert.equal(state.phase, 'DEALER_TURN');
+});
+
 test('rejects double down after the first two cards', () => {
   const state = stateWithHand(['2', '3', '4']);
   const hand = state.seats[0].hands[0];
