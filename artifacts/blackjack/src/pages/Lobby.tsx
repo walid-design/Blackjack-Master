@@ -19,12 +19,12 @@ const BG_SUITS: Array<{ suit: string; top: string; left: string; size: number; o
 
 // ── Table card accent colours ──────────────────────────────────────────────
 const TABLE_ACCENTS: Record<string, { felt: string; glow: string; badge?: string }> = {
-  classic:    { felt: 'from-[#0e3d20] to-[#072010]',       glow: 'rgba(34,197,94,0.12)' },
-  downtown:   { felt: 'from-[#0f3825] to-[#061c10]',       glow: 'rgba(52,211,153,0.10)' },
-  speed:      { felt: 'from-[#1a2f0a] to-[#0d1c04]',       glow: 'rgba(132,204,22,0.10)' },
-  'high-roller': { felt: 'from-[#2a1a08] to-[#120c02]',    glow: 'rgba(234,179,8,0.15)',  badge: 'HIGH ROLLER' },
-  'vegas-strip': { felt: 'from-[#1c0a2e] to-[#0c0418]',    glow: 'rgba(168,85,247,0.12)', badge: 'FEATURED' },
-  vip:        { felt: 'from-[#1a0a08] to-[#0d0402]',       glow: 'rgba(239,68,68,0.12)',  badge: 'VIP ONLY' },
+  classic:       { felt: 'from-[#17683d] to-[#082c19]', glow: 'rgba(39,185,102,0.15)' },
+  downtown:      { felt: 'from-[#176b64] to-[#062e2b]', glow: 'rgba(54,192,174,0.15)' },
+  speed:         { felt: 'from-[#20559c] to-[#0a244c]', glow: 'rgba(75,145,245,0.17)' },
+  'high-roller': { felt: 'from-[#234b65] to-[#0a2031]', glow: 'rgba(83,165,211,0.16)', badge: 'HIGH ROLLER' },
+  'vegas-strip': { felt: 'from-[#60368a] to-[#260e3a]', glow: 'rgba(168,85,225,0.17)', badge: 'FEATURED' },
+  vip:           { felt: 'from-[#7b2637] to-[#350d18]', glow: 'rgba(214,68,91,0.17)', badge: 'VIP ONLY' },
 };
 
 // ── Buy-in amounts ─────────────────────────────────────────────────────────

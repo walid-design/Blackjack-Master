@@ -78,6 +78,53 @@ const SIDE_BET_PAYOUTS: Record<string, { label: string; color: string; rows: [st
   bustIt:             { label: 'Bust It',          color: '#ff5050', rows: [['8+ card bust','200:1'],['7-card bust','100:1'],['6-card bust','18:1'],['5-card bust','8:1'],['4-card bust','2:1'],['3-card bust','1:1']] },
 };
 
+interface TableTheme {
+  felt: string;
+  surround: string;
+  header: string;
+  history: string;
+  rail: string;
+  railEdge: string;
+  accent: string;
+  accentSoft: string;
+  glow: string;
+}
+
+// Each room has its own material palette, like a real casino floor. The felt
+// uses layered gradients so the colour still has depth instead of looking flat.
+const TABLE_THEMES: Record<string, TableTheme> = {
+  classic: {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(53,169,103,0.34) 0%, transparent 42%), radial-gradient(ellipse 100% 80% at 50% 15%, #20844a 0%, #15633a 35%, #0d4a28 62%, #051f10 100%)',
+    surround: '#0b1019', header: 'rgba(12,16,29,0.98)', history: 'rgba(8,13,24,0.90)',
+    rail: '#35180b', railEdge: '#180903', accent: '#efbd4d', accentSoft: 'rgba(239,189,77,0.15)', glow: 'rgba(39,185,102,0.18)',
+  },
+  'high-roller': {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(92,157,196,0.28) 0%, transparent 43%), radial-gradient(ellipse 100% 80% at 50% 15%, #28536e 0%, #193c54 35%, #102b40 62%, #071824 100%)',
+    surround: '#080d14', header: 'rgba(7,13,22,0.98)', history: 'rgba(6,12,20,0.92)',
+    rail: '#241811', railEdge: '#0d0805', accent: '#f1ca72', accentSoft: 'rgba(241,202,114,0.16)', glow: 'rgba(83,165,211,0.20)',
+  },
+  vip: {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(211,76,96,0.30) 0%, transparent 43%), radial-gradient(ellipse 100% 80% at 50% 15%, #8b2c3d 0%, #671c2c 35%, #45111e 63%, #260810 100%)',
+    surround: '#14080b', header: 'rgba(23,8,13,0.98)', history: 'rgba(18,7,11,0.92)',
+    rail: '#411711', railEdge: '#190604', accent: '#f3d18b', accentSoft: 'rgba(243,209,139,0.17)', glow: 'rgba(214,68,91,0.22)',
+  },
+  downtown: {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(62,184,170,0.29) 0%, transparent 43%), radial-gradient(ellipse 100% 80% at 50% 15%, #1a7b72 0%, #105b56 35%, #093f3b 63%, #042522 100%)',
+    surround: '#071210', header: 'rgba(7,19,18,0.98)', history: 'rgba(5,16,15,0.92)',
+    rail: '#3b2615', railEdge: '#1a0f07', accent: '#e7a55f', accentSoft: 'rgba(231,165,95,0.16)', glow: 'rgba(54,192,174,0.20)',
+  },
+  speed: {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(86,153,239,0.32) 0%, transparent 43%), radial-gradient(ellipse 100% 80% at 50% 15%, #2863b2 0%, #19498b 35%, #0f3063 63%, #071a37 100%)',
+    surround: '#070d19', header: 'rgba(7,13,26,0.98)', history: 'rgba(5,11,23,0.92)',
+    rail: '#202429', railEdge: '#090b0e', accent: '#65d8ff', accentSoft: 'rgba(101,216,255,0.16)', glow: 'rgba(75,145,245,0.23)',
+  },
+  'vegas-strip': {
+    felt: 'radial-gradient(ellipse 105% 82% at 50% 12%, rgba(176,104,225,0.30) 0%, transparent 43%), radial-gradient(ellipse 100% 80% at 50% 15%, #704198 0%, #502971 35%, #35164f 63%, #1d092e 100%)',
+    surround: '#100817', header: 'rgba(17,8,25,0.98)', history: 'rgba(14,6,22,0.92)',
+    rail: '#241522', railEdge: '#0c070c', accent: '#f0c65d', accentSoft: 'rgba(240,198,93,0.17)', glow: 'rgba(168,85,225,0.22)',
+  },
+};
+
 interface DealerHistoryEntry { total: number; bust: boolean; bj: boolean }
 
 export default function Table() {
@@ -212,6 +259,7 @@ export default function Table() {
 
   if (!tableConfig) { setLocation('/'); return null; }
 
+  const theme = TABLE_THEMES[tableConfig.id] ?? TABLE_THEMES.classic;
   const seatPositions = getSeatPositions(tableConfig.seats, isMobile);
   const shoeTotal     = tableConfig.decks * 52;
   const shoePct       = Math.round((state.shoe.length / shoeTotal) * 100);
@@ -222,7 +270,7 @@ export default function Table() {
   return (
     <div style={{
       height: '100dvh', display: 'flex', flexDirection: 'column',
-      background: '#0d1020', overflow: 'hidden',
+      background: theme.surround, overflow: 'hidden',
       userSelect: 'none', fontFamily: "'Playfair Display', serif", color: '#f0e6c8',
       ['--table-ui-scale' as string]: tableUiScale,
     }}>
@@ -232,8 +280,9 @@ export default function Table() {
         height: 46, flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 16px',
-        background: 'rgba(15,18,36,0.98)',
-        borderBottom: '1px solid rgba(240,184,48,0.12)',
+        background: theme.header,
+        borderBottom: `1px solid ${theme.accentSoft}`,
+        boxShadow: `0 8px 28px ${theme.glow}`,
         zIndex: 30,
       }}>
         <button
@@ -251,7 +300,7 @@ export default function Table() {
         </button>
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.22em', color: '#f0b830' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.22em', color: theme.accent }}>
             {tableConfig.name.toUpperCase()}
           </div>
           <div style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(240,230,200,0.28)', fontFamily: 'sans-serif', marginTop: 1 }}>
@@ -266,7 +315,7 @@ export default function Table() {
             <motion.div
               animate={{ width: `${Math.max(4, shoePct)}%` }}
               transition={{ duration: 0.5 }}
-              style={{ height: '100%', background: shoePct < 25 ? '#e04040' : '#f0b830', borderRadius: 3 }}
+              style={{ height: '100%', background: shoePct < 25 ? '#e04040' : theme.accent, borderRadius: 3 }}
             />
           </div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: 'sans-serif', minWidth: 32 }}>
@@ -278,8 +327,8 @@ export default function Table() {
       {/* ── DEALER HISTORY STRIP ── always rendered so it never causes a layout shift */}
       <div style={{
         height: 28, flexShrink: 0,
-        background: 'rgba(12,15,30,0.80)',
-        borderBottom: '1px solid rgba(240,184,48,0.08)',
+        background: theme.history,
+        borderBottom: `1px solid ${theme.accentSoft}`,
         display: 'flex', alignItems: 'center',
         padding: '0 12px', gap: 6,
         zIndex: 29,
@@ -311,18 +360,18 @@ export default function Table() {
       </div>
 
       {/* ── GAME AREA (felt table) ── */}
-      <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#0d1020' }}>
+      <div ref={gameAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: theme.surround }}>
 
         {/* FELT */}
         <div style={{
           position: 'absolute',
           top: 0, left: '-3%', right: '-3%', bottom: '1%',
-          background: 'radial-gradient(ellipse 100% 80% at 50% 15%, #20844a 0%, #15633a 35%, #0d4a28 60%, #083318 88%, #051e10 100%)',
+          background: theme.felt,
           borderRadius: '0 0 50% 50% / 0 0 18% 18%',
-          borderBottom: '22px solid #1e0e04',
-          borderLeft: '8px solid #180b03',
-          borderRight: '8px solid #180b03',
-          boxShadow: 'inset 0 0 100px rgba(0,0,0,0.5), 0 12px 50px rgba(0,0,0,0.9)',
+          borderBottom: `22px solid ${theme.rail}`,
+          borderLeft: `8px solid ${theme.railEdge}`,
+          borderRight: `8px solid ${theme.railEdge}`,
+          boxShadow: `inset 0 0 110px rgba(0,0,0,0.52), inset 0 -12px 24px rgba(0,0,0,0.22), 0 12px 50px rgba(0,0,0,0.9), 0 0 42px ${theme.glow}`,
           zIndex: 1,
         }}>
 
