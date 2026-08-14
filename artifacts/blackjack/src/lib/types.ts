@@ -1,19 +1,36 @@
-import { Card, GamePhase, Seat, HandStatus, SideBets } from './blackjack';
+import type { Card, GamePhase, Seat, HandStatus, SideBets, TableConfig } from './blackjack.ts';
+
+export interface CardIntegrity {
+  valid: boolean;
+  total: number;
+  expected: number;
+  duplicateIds: string[];
+}
 
 export interface GameState {
   phase: GamePhase;
+  table: TableConfig;
   shoe: Card[];
   discard: Card[];
   seats: Seat[];
   dealerCards: Card[];
   dealerStatus: HandStatus;
+  settled: boolean;
   activeSeatIndex: number;
   cutCardIndex: number;
+  /** Actual fraction selected for this fresh shoe. */
+  penetration: number;
   needsShuffle: boolean;
+  shoeNumber: number;
+  shuffleStage?: 'collecting' | 'shuffling' | 'burning';
+  lastBurnCardId?: string;
+  cardIntegrity: CardIntegrity;
   /** Identifies the active initial-deal sequence so stale timed actions are ignored. */
   dealSequence: number;
   /** True while a turn-ending HIT/DOUBLE card is still flying to the hand. */
   pendingTurnAdvance?: boolean;
+  /** Blocks repeat actions until a newly dealt player card lands. */
+  actionLocked: boolean;
   bankroll: number;
   bettingSeatId?: number;
   /** Set during SPLIT_DEALING — which hand index within activeSeatIndex gets the next card */
@@ -37,19 +54,22 @@ export type GameAction =
   | { type: 'CARD_DEALT'; to: 'player' | 'dealer'; seatId?: number; dealSequence: number }
   | { type: 'CHECK_DEALER_BJ'; dealSequence: number }
   | { type: 'START_PLAYER_TURN' }
-  | { type: 'HIT' }
-  | { type: 'STAND' }
-  | { type: 'DOUBLE' }
-  | { type: 'SPLIT' }
+  | { type: 'HIT'; seatId: number; handId: string }
+  | { type: 'STAND'; seatId: number; handId: string }
+  | { type: 'DOUBLE'; seatId: number; handId: string }
+  | { type: 'SPLIT'; seatId: number; handId: string }
   | { type: 'SPLIT_CARD' }
-  | { type: 'SURRENDER' }
-  | { type: 'INSURANCE' }
-  | { type: 'DECLINE_INSURANCE' }
+  | { type: 'PLAYER_CARD_LANDED'; seatId: number; handId: string; cardId: string }
+  | { type: 'SURRENDER'; seatId: number; handId: string }
+  | { type: 'INSURANCE'; seatId: number }
+  | { type: 'DECLINE_INSURANCE'; seatId: number }
   | { type: 'NEXT_HAND' }
   | { type: 'DEALER_TURN' }
   | { type: 'DEALER_PLAY' }
   | { type: 'PERFORM_SETTLEMENT' }
   | { type: 'SETTLEMENT' }
   | { type: 'NEXT_ROUND' }
+  | { type: 'RESHUFFLE' }
+  | { type: 'SHUFFLE_COMPLETE' }
   | { type: 'ADD_BANKROLL'; amount: number }
   | { type: 'REPEAT_BET' };

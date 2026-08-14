@@ -476,7 +476,7 @@ function TableCard({ table, index, onJoin }: { table: TableConfig; index: number
             fontFamily: 'Inter, sans-serif', marginTop: 3,
             letterSpacing: '0.1em', textTransform: 'uppercase',
           }}>
-            {table.decks} Deck{table.decks > 1 ? 's' : ''} · Dealer Stands 17s
+            {table.decks} Deck{table.decks > 1 ? 's' : ''} · S17 · Double first 2
           </div>
         </div>
       </div>

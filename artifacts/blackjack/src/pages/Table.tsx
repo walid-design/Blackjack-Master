@@ -234,19 +234,27 @@ export default function Table() {
     };
   }, [state.phase, state.dealSequence]);
 
-  // SPLIT_DEALING: deal one card to each split hand 550ms apart
+  // Deal one card to the active split hand; the next hand waits its turn.
   const splitDealingRef = useRef(false);
   useEffect(() => {
     if (state.phase !== 'SPLIT_DEALING') { splitDealingRef.current = false; return; }
     if (splitDealingRef.current) return;
     splitDealingRef.current = true;
-    (async () => {
-      await sleep(720);
-      dispatch({ type: 'SPLIT_CARD' }); // card to hand 0
-      await sleep(720);
-      dispatch({ type: 'SPLIT_CARD' }); // card to hand 1 → transitions to PLAYER_TURN
-    })();
+    const timer = setTimeout(() => dispatch({ type: 'SPLIT_CARD' }), 720);
+    return () => clearTimeout(timer);
   }, [state.phase, (state as any).splitCardTarget]);
+
+  useEffect(() => {
+    if (state.phase !== 'SHUFFLING') return;
+    const delay = state.shuffleStage === 'collecting'
+      ? 900
+      : state.shuffleStage === 'shuffling'
+        ? 1500
+        : 1050;
+    const type = state.shuffleStage === 'burning' ? 'SHUFFLE_COMPLETE' : 'RESHUFFLE';
+    const timer = setTimeout(() => dispatch({ type }), delay);
+    return () => clearTimeout(timer);
+  }, [state.phase, state.shuffleStage]);
 
   // Dealer draws one card at a time. The pause starts only after any
   // turn-ending player card has landed and the dealer phase actually begins.
@@ -406,10 +414,12 @@ export default function Table() {
             textAlign: 'center', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 2,
           }}>
             <div style={{ fontStyle: 'italic', fontWeight: 700, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.075)', fontSize: 'clamp(13px,1.8vw,21px)', textTransform: 'uppercase' }}>
-              Blackjack Pays 3 to 2
+              Blackjack Pays {tableConfig.rules.blackjackPayout === 1.5 ? '3 to 2' : `${tableConfig.rules.blackjackPayout} to 1`}
             </div>
             <div style={{ color: 'rgba(255,255,255,0.05)', fontSize: 'clamp(8px,1vw,12px)', letterSpacing: '0.14em', marginTop: 4, fontFamily: 'sans-serif', textTransform: 'uppercase' }}>
-              Dealer Must Draw to 16 and Stand on All 17s
+              {tableConfig.rules.dealerHitsSoft17
+                ? 'Dealer Draws to 16 and Hits Soft 17'
+                : 'Dealer Must Draw to 16 and Stand on All 17s'}
             </div>
             <div style={{ color: 'rgba(255,255,255,0.045)', fontSize: 'clamp(7px,0.85vw,11px)', letterSpacing: '0.12em', marginTop: 3, fontFamily: 'sans-serif', fontStyle: 'italic', textTransform: 'uppercase' }}>
               Insurance Pays 2 to 1
@@ -420,10 +430,35 @@ export default function Table() {
           <DealerZone state={state} collectingCards={collectingCards} />
 
           {/* Card shoe */}
-          <CardShoe shoe={state.shoe} decks={tableConfig.decks} isMobile={isMobile} />
+          <CardShoe
+            shoe={state.shoe}
+            decks={tableConfig.decks}
+            cutCardIndex={state.cutCardIndex}
+            needsShuffle={state.needsShuffle}
+            shoeNumber={state.shoeNumber}
+            isMobile={isMobile}
+          />
 
           {/* Used cards accumulate here between shuffles */}
           <DiscardTray discard={state.discard} decks={tableConfig.decks} isMobile={isMobile} />
+
+          <AnimatePresence>
+            {state.phase === 'SHUFFLING' && (
+              <ShuffleCeremony stage={state.shuffleStage} shoeNumber={state.shoeNumber + (state.shuffleStage === 'burning' ? 0 : 1)} />
+            )}
+          </AnimatePresence>
+
+          {!state.cardIntegrity.valid && (
+            <div style={{
+              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 70, padding: '7px 12px', borderRadius: 6,
+              background: 'rgba(110,8,16,0.95)', border: '1px solid rgba(255,110,120,0.7)',
+              color: '#ffe4e6', fontSize: 10, fontFamily: 'sans-serif', fontWeight: 800,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>
+              Shoe integrity paused · {state.cardIntegrity.total}/{state.cardIntegrity.expected} cards
+            </div>
+          )}
 
           {/* Seats — arc point is the CENTRE of the bet circle; SeatSpot anchors to it */}
           {seatPositions.map(({ x, y }, i) => (
@@ -946,7 +981,7 @@ function DealerZone({ state, collectingCards = false }: { state: any; collecting
         <AnimatePresence>
           {dealerCards.map((card, i) => (
             <DealerCardAnim
-              key={`dc-${i}`}
+              key={card.id}
               card={card}
               index={i}
               faceDown={!revealed}
@@ -1045,9 +1080,89 @@ function CardCollectionAnimation({ state, seatPositions, active }: {
   );
 }
 
-function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: number; isMobile?: boolean }) {
+function ShuffleCeremony({ stage, shoeNumber }: {
+  stage?: 'collecting' | 'shuffling' | 'burning';
+  shoeNumber: number;
+}) {
+  const copy = stage === 'collecting'
+    ? { eyebrow: 'Cut card reached', title: 'Collecting the shoe', detail: 'Every card is being verified before the shuffle' }
+    : stage === 'shuffling'
+      ? { eyebrow: `Preparing shoe ${shoeNumber}`, title: 'Casino shuffle', detail: 'Securely randomizing the complete shoe' }
+      : { eyebrow: `Shoe ${shoeNumber} ready`, title: 'Burning one card', detail: 'The cut is set and play will resume' };
+
+  return (
+    <motion.div
+      key="shuffle-ceremony"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{
+        position: 'absolute', inset: 0, zIndex: 55,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'radial-gradient(circle at 50% 42%,rgba(6,18,15,0.52),rgba(2,5,5,0.82))',
+        backdropFilter: 'blur(2px)', pointerEvents: 'all',
+      }}
+    >
+      <motion.div
+        key={stage}
+        initial={{ opacity: 0, y: 10, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.34 }}
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}
+      >
+        <div style={{ position: 'relative', width: 104, height: 70 }}>
+          {[0, 1, 2, 3].map(i => (
+            <motion.div
+              key={i}
+              animate={stage === 'shuffling'
+                ? { x: [0, i % 2 ? 24 : -24, 0], rotate: [i * 3 - 5, i % 2 ? 12 : -12, i * 3 - 5] }
+                : { x: 0, rotate: i * 3 - 5 }}
+              transition={{ duration: 0.72, delay: i * 0.08, repeat: stage === 'shuffling' ? Infinity : 0, repeatDelay: 0.08 }}
+              style={{
+                position: 'absolute', left: 27 + i * 2, top: 1 + i * 2,
+                width: 49, height: 67, borderRadius: 5,
+                background: 'repeating-linear-gradient(45deg,#71141b 0 4px,#a5232c 4px 8px,#e6d9b6 8px 9px)',
+                border: '2px solid #eee5cd', boxShadow: '0 8px 16px rgba(0,0,0,0.48)',
+                transformOrigin: 'center bottom',
+              }}
+            />
+          ))}
+          {stage === 'burning' && (
+            <motion.div
+              initial={{ x: 0, opacity: 0 }} animate={{ x: -48, y: 9, rotate: -16, opacity: 1 }}
+              style={{
+                position: 'absolute', left: 31, top: 3, width: 49, height: 67, borderRadius: 5,
+                background: 'repeating-linear-gradient(45deg,#71141b 0 4px,#a5232c 4px 8px,#e6d9b6 8px 9px)',
+                border: '2px solid #eee5cd', boxShadow: '0 8px 16px rgba(0,0,0,0.48)',
+              }}
+            />
+          )}
+        </div>
+        <div style={{ fontSize: 9, color: '#d8ab3d', letterSpacing: '0.22em', textTransform: 'uppercase', fontFamily: 'sans-serif', fontWeight: 800 }}>
+          {copy.eyebrow}
+        </div>
+        <div style={{ fontSize: 22, color: '#f7edcf', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
+          {copy.title}
+        </div>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.52)', letterSpacing: '0.06em', fontFamily: 'sans-serif' }}>
+          {copy.detail}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function CardShoe({ shoe, decks, cutCardIndex, needsShuffle, shoeNumber, isMobile = false }: {
+  shoe: Card[];
+  decks: number;
+  cutCardIndex: number;
+  needsShuffle: boolean;
+  shoeNumber: number;
+  isMobile?: boolean;
+}) {
   const total = decks * 52;
   const fill = shoe.length / total;
+  const cardsUntilCut = Math.max(0, shoe.length - cutCardIndex);
+  const cutCardVisible = needsShuffle || cardsUntilCut <= Math.max(5, Math.round(total * 0.08));
   const cardW = isMobile ? 50 : 92;
   const cardH = isMobile ? 38 : 58;
   const housingW = isMobile ? 72 : 128;
@@ -1090,11 +1205,24 @@ function CardShoe({ shoe, decks, isMobile = false }: { shoe: Card[]; decks: numb
           boxShadow: '0 4px 6px rgba(0,0,0,0.7), inset 0 2px 4px rgba(0,0,0,0.9)',
         }}>
           <div id="card-shoe-mouth" style={{ width: '42%', height: 6, margin: '6px 8px 0 auto', borderRadius: 4, background: '#020303', boxShadow: '0 1px 0 rgba(255,255,255,0.08)' }} />
+          {cutCardVisible && (
+            <motion.div
+              initial={{ x: 10, opacity: 0 }}
+              animate={{ x: needsShuffle ? -2 : 3, opacity: 1 }}
+              style={{
+                position: 'absolute', right: 7, top: 4, width: '46%', height: 9,
+                borderRadius: '2px 1px 1px 2px',
+                background: 'linear-gradient(180deg,#ffe078,#e0a719)',
+                border: '1px solid rgba(82,48,0,0.8)',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.65)', zIndex: 4,
+              }}
+            />
+          )}
         </div>
         <div style={{ position: 'absolute', top: 8, left: 18, width: 2, height: '58%', transform: 'rotate(8deg)', background: 'rgba(255,255,255,0.15)', filter: 'blur(.2px)' }} />
       </div>
       <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', fontFamily: 'sans-serif', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-        Shoe · {shoe.length}/{total}
+        Shoe {shoeNumber} · {shoe.length}/{total}{needsShuffle ? ' · Cut card' : ''}
       </div>
     </div>
   );
@@ -1270,15 +1398,23 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
     && calculateHandValue(activeHand.cards).total === 21;
 
   // Double: allowed on any number of cards (any-double rule), requires bankroll
-  const canDouble    = !!activeHand && !hasNaturalBJ && state.bankroll >= activeHand.bet;
+  const canDouble    = !!activeHand && !hasNaturalBJ
+                       && (!config.rules.doubleOnFirstTwoOnly || activeHand.cards.length === 2)
+                       && (!activeHand.isSplit || config.rules.doubleAfterSplit)
+                       && state.bankroll >= activeHand.bet;
 
   // Split: first 2 matching cards, max 4 hands, bankroll available
   const canSplit     = !!activeHand && activeHand.cards.length === 2
-                       && activeHand.cards[0].rank === activeHand.cards[1].rank
-                       && state.bankroll >= activeHand.bet && seat.hands.length < 4;
+                       && (config.rules.splitByValue
+                         ? activeHand.cards[0].value === activeHand.cards[1].value
+                         : activeHand.cards[0].rank === activeHand.cards[1].rank)
+                       && !(activeHand.cards[0].rank === 'A' && activeHand.isSplit && !config.rules.resplitAces)
+                       && state.bankroll >= activeHand.bet
+                       && seat.hands.length < config.rules.maxSplitHands;
 
   // Late surrender: first 2 cards only, not after a split
-  const canSurrender = !!activeHand && activeHand.cards.length === 2 && !activeHand.isSplit;
+  const canSurrender = !!activeHand && config.rules.lateSurrender
+                       && activeHand.cards.length === 2 && !activeHand.isSplit;
 
   // ── EMPTY SEAT ───────────────────────────────────────────────────────────
   if (!seat.isActive) {
@@ -1429,12 +1565,17 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
               <div style={{ position: 'relative', width: handW, height: handH }}>
                 {hand.cards.map((card: Card, cIdx: number) => (
                   <PlayerCardAnim
-                    key={`${hand.id}-${cIdx}`}
+                    key={card.id}
                     card={card}
                     cIdx={cIdx}
                     onLanded={
-                      state.pendingTurnAdvance && isThisHand && cIdx === hand.cards.length - 1
-                        ? () => dispatch({ type: 'NEXT_HAND' })
+                      state.actionLocked && isThisHand && cIdx === hand.cards.length - 1
+                        ? () => dispatch({
+                            type: 'PLAYER_CARD_LANDED',
+                            seatId: seatIndex,
+                            handId: hand.id,
+                            cardId: card.id,
+                          })
                         : undefined
                     }
                   />
@@ -1540,9 +1681,9 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           <div style={{ fontSize: 10, letterSpacing: '0.16em', color: '#f0b830', textTransform: 'uppercase', fontFamily: 'sans-serif', marginBottom: 5 }}>Insurance?</div>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: 'sans-serif', marginBottom: 8 }}>Max ${Math.floor(currentBet / 2)}</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button onClick={() => dispatch({ type: 'INSURANCE' })}
+            <button onClick={() => dispatch({ type: 'INSURANCE', seatId: seatIndex })}
               style={{ flex: 1, padding: '4px 0', background: '#f0b830', color: '#000', fontWeight: 700, fontSize: 10, borderRadius: 4, border: 'none', cursor: 'pointer', fontFamily: 'sans-serif' }}>Buy</button>
-            <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE' })}
+            <button onClick={() => dispatch({ type: 'DECLINE_INSURANCE', seatId: seatIndex })}
               style={{ flex: 1, padding: '4px 0', background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', fontWeight: 700, fontSize: 10, borderRadius: 4, border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', fontFamily: 'sans-serif' }}>Skip</button>
           </div>
         </motion.div>
@@ -1638,7 +1779,7 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
           `right: -R` (panel's right edge pins to the circle's right edge, grows left).
           Left-edge seats use `left: -R`. Center seats use left:0 + translateX(-50%). */}
       <AnimatePresence>
-        {!isMobile && isPlayerTurn && !state.pendingTurnAdvance && !hasNaturalBJ && (
+        {!isMobile && isPlayerTurn && !state.actionLocked && !state.pendingTurnAdvance && !hasNaturalBJ && (
           <div style={{
             position: 'absolute', top: R + 8,
             ...(seatXPct < 33
@@ -1655,13 +1796,13 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
             >
               <div style={{ display: 'flex', gap: 4 }}>
-                <button data-testid="button-hit"   onClick={() => dispatch({ type: 'HIT' })}   style={feltActionBtn(false, true)}>Hit</button>
-                <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND' })} style={feltActionBtn(false, false)}>Stand</button>
+                <button data-testid="button-hit"   onClick={() => dispatch({ type: 'HIT', seatId: seatIndex, handId: activeHand!.id })}   style={feltActionBtn(false, true)}>Hit</button>
+                <button data-testid="button-stand" onClick={() => dispatch({ type: 'STAND', seatId: seatIndex, handId: activeHand!.id })} style={feltActionBtn(false, false)}>Stand</button>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <button data-testid="button-double"    onClick={() => canDouble    && dispatch({ type: 'DOUBLE' })}    style={feltActionBtn(!canDouble,    false)}>Double</button>
-                <button data-testid="button-split"     onClick={() => canSplit     && dispatch({ type: 'SPLIT' })}     style={feltActionBtn(!canSplit,     false)}>Split</button>
-                <button data-testid="button-surrender" onClick={() => canSurrender && dispatch({ type: 'SURRENDER' })} style={feltActionBtn(!canSurrender, false)}>Surr.</button>
+                <button data-testid="button-double"    onClick={() => canDouble    && dispatch({ type: 'DOUBLE', seatId: seatIndex, handId: activeHand!.id })}    style={feltActionBtn(!canDouble,    false)}>Double</button>
+                <button data-testid="button-split"     onClick={() => canSplit     && dispatch({ type: 'SPLIT', seatId: seatIndex, handId: activeHand!.id })}     style={feltActionBtn(!canSplit,     false)}>Split</button>
+                <button data-testid="button-surrender" onClick={() => canSurrender && dispatch({ type: 'SURRENDER', seatId: seatIndex, handId: activeHand!.id })} style={feltActionBtn(!canSurrender, false)}>Surr.</button>
               </div>
             </motion.div>
           </div>
@@ -1678,20 +1819,27 @@ function SeatSpot({ seat, state, dispatch, seatIndex, config, selectedChip, seat
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
-  if (state.phase !== 'PLAYER_TURN' || state.pendingTurnAdvance) return null;
+  if (state.phase !== 'PLAYER_TURN' || state.actionLocked || state.pendingTurnAdvance) return null;
   const seat: Seat | undefined = state.seats[state.activeSeatIndex];
   const activeHand: Hand | undefined = seat?.hands[seat.activeHandIndex];
-  if (!activeHand) return null;
+  if (!seat || !activeHand) return null;
 
   const hasNaturalBJ = !activeHand.isSplit && activeHand.cards.length === 2
     && calculateHandValue(activeHand.cards).total === 21;
   if (hasNaturalBJ) return null;
 
-  const canDouble    = state.bankroll >= activeHand.bet;
+  const rules = state.table.rules;
+  const canDouble    = (!rules.doubleOnFirstTwoOnly || activeHand.cards.length === 2)
+    && (!activeHand.isSplit || rules.doubleAfterSplit)
+    && state.bankroll >= activeHand.bet;
   const canSplit     = activeHand.cards.length === 2
-    && activeHand.cards[0].rank === activeHand.cards[1].rank
-    && state.bankroll >= activeHand.bet && (seat?.hands.length ?? 0) < 4;
-  const canSurrender = activeHand.cards.length === 2 && !activeHand.isSplit;
+    && (rules.splitByValue
+      ? activeHand.cards[0].value === activeHand.cards[1].value
+      : activeHand.cards[0].rank === activeHand.cards[1].rank)
+    && !(activeHand.cards[0].rank === 'A' && activeHand.isSplit && !rules.resplitAces)
+    && state.bankroll >= activeHand.bet
+    && (seat?.hands.length ?? 0) < rules.maxSplitHands;
+  const canSurrender = rules.lateSurrender && activeHand.cards.length === 2 && !activeHand.isSplit;
 
   return (
     <motion.div
@@ -1717,7 +1865,7 @@ function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
         ].map(({ label, action, primary, disabled }) => (
           <button key={action}
             data-testid={`button-${label.toLowerCase()}`}
-            onClick={() => dispatch({ type: action })}
+            onClick={() => dispatch({ type: action, seatId: seat.id, handId: activeHand.id })}
             style={{
               flex: 1, height: 50,
               background: primary
@@ -1743,7 +1891,7 @@ function PlayerActionStrip({ state, dispatch }: { state: any; dispatch: any }) {
         ].map(({ label, action, disabled }) => (
           <button key={action}
             data-testid={`button-${action.toLowerCase()}`}
-            onClick={() => !disabled && dispatch({ type: action })}
+            onClick={() => !disabled && dispatch({ type: action, seatId: seat.id, handId: activeHand.id })}
             style={{
               flex: 1, height: 36,
               background: disabled ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.07)',
@@ -1964,6 +2112,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
             {state.phase === 'DEALING' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Dealing…</div>}
             {state.phase === 'INSURANCE' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Insurance at seat</div>}
             {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Dealer playing…</div>}
+            {state.phase === 'SHUFFLING' && <div style={{ fontSize: 9, color: 'rgba(212,168,32,0.62)', fontFamily: 'sans-serif', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Preparing fresh shoe…</div>}
           </div>
         </div>
 
@@ -2004,6 +2153,7 @@ function ControlBar({ state, dispatch, playerName, config, selectedChip, setSele
         {state.phase === 'DEALING'     && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealing…</div>}
         {state.phase === 'INSURANCE'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.6)', fontFamily: 'sans-serif' }}>Insurance offered — respond at your seat</div>}
         {state.phase === 'DEALER_TURN' && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.4)', fontFamily: 'sans-serif' }}>Dealer's turn…</div>}
+        {state.phase === 'SHUFFLING'   && <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(212,168,32,0.62)', fontFamily: 'sans-serif' }}>Preparing fresh shoe…</div>}
       </div>
 
       {/* Right spacer — keeps bankroll left-anchored */}

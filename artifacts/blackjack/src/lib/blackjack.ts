@@ -2,6 +2,12 @@ export type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades';
 export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K' | 'A';
 
 export interface Card {
+  /** Unique for one physical card in one shoe. */
+  id: string;
+  /** Identifies the fresh shoe this card belongs to. */
+  shoeId: string;
+  /** Zero-based source deck within a multi-deck shoe. */
+  deckIndex: number;
   suit: Suit;
   rank: Rank;
   value: number; // 11 for Ace initially
@@ -47,7 +53,7 @@ export interface Seat {
   sideBetResults: SideBetResult[];
 }
 
-export type GamePhase = 'SEAT_SELECTION' | 'BETTING' | 'DEALING' | 'SPLIT_DEALING' | 'INSURANCE' | 'PLAYER_TURN' | 'DEALER_TURN' | 'SETTLEMENT';
+export type GamePhase = 'SEAT_SELECTION' | 'BETTING' | 'DEALING' | 'SPLIT_DEALING' | 'INSURANCE' | 'PLAYER_TURN' | 'DEALER_TURN' | 'SETTLEMENT' | 'SHUFFLING';
 
 export interface TableConfig {
   id: string;
@@ -57,18 +63,56 @@ export interface TableConfig {
   maxBet: number;
   seats: number;
   sideBets: string[];
+  rules: TableRules;
 }
 
+export interface TableRules {
+  dealerHitsSoft17: boolean;
+  blackjackPayout: number;
+  doubleOnFirstTwoOnly: boolean;
+  doubleAfterSplit: boolean;
+  splitByValue: boolean;
+  maxSplitHands: number;
+  resplitAces: boolean;
+  hitSplitAces: boolean;
+  lateSurrender: boolean;
+  /** Fraction of the shoe dealt before the cut card appears. */
+  penetration: [number, number];
+  burnCards: number;
+}
+
+const STANDARD_RULES: Omit<TableRules, 'penetration'> = {
+  dealerHitsSoft17: false,
+  blackjackPayout: 1.5,
+  doubleOnFirstTwoOnly: true,
+  doubleAfterSplit: true,
+  splitByValue: true,
+  maxSplitHands: 4,
+  resplitAces: false,
+  hitSplitAces: false,
+  lateSurrender: true,
+  burnCards: 1,
+};
+
 export const TABLES: TableConfig[] = [
-  { id: 'classic',      name: 'Classic',         decks: 1, minBet: 10,  maxBet: 500,  seats: 5, sideBets: ['insurance', 'perfectPairs'] },
-  { id: 'high-roller',  name: 'High Roller',      decks: 6, minBet: 100, maxBet: 5000, seats: 7, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLadies'] },
-  { id: 'vip',          name: 'VIP Suite',         decks: 8, minBet: 250, maxBet: 10000,seats: 3, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLadies', 'superSevens', 'luckyLucky'] },
-  { id: 'downtown',     name: 'Downtown',          decks: 2, minBet: 5,   maxBet: 200,  seats: 7, sideBets: ['insurance', 'royalMatch'] },
-  { id: 'speed',        name: 'Speed Table',       decks: 4, minBet: 25,  maxBet: 1000, seats: 5, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree'] },
-  { id: 'vegas-strip',  name: 'Vegas Strip',       decks: 6, minBet: 50,  maxBet: 2500, seats: 6, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLucky', 'bustIt'] },
+  { id: 'classic',      name: 'Classic',         decks: 1, minBet: 10,  maxBet: 500,  seats: 5, sideBets: ['insurance', 'perfectPairs'], rules: { ...STANDARD_RULES, doubleAfterSplit: false, penetration: [0.58, 0.65] } },
+  { id: 'high-roller',  name: 'High Roller',     decks: 6, minBet: 100, maxBet: 5000, seats: 7, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLadies'], rules: { ...STANDARD_RULES, penetration: [0.72, 0.78] } },
+  { id: 'vip',          name: 'VIP Suite',       decks: 8, minBet: 250, maxBet: 10000,seats: 3, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLadies', 'superSevens', 'luckyLucky'], rules: { ...STANDARD_RULES, penetration: [0.74, 0.80] } },
+  { id: 'downtown',     name: 'Downtown',        decks: 2, minBet: 5,   maxBet: 200,  seats: 7, sideBets: ['insurance', 'royalMatch'], rules: { ...STANDARD_RULES, penetration: [0.62, 0.70] } },
+  { id: 'speed',        name: 'Speed Table',     decks: 4, minBet: 25,  maxBet: 1000, seats: 5, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree'], rules: { ...STANDARD_RULES, penetration: [0.68, 0.76] } },
+  { id: 'vegas-strip',  name: 'Vegas Strip',     decks: 6, minBet: 50,  maxBet: 2500, seats: 6, sideBets: ['insurance', 'perfectPairs', 'twentyOnePlusThree', 'luckyLucky', 'bustIt'], rules: { ...STANDARD_RULES, penetration: [0.72, 0.78] } },
 ];
 
-export function buildShoe(decks: number): Card[] {
+let fallbackIdCounter = 0;
+
+export function createGameId(prefix: string): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `${prefix}-${uuid}`;
+  fallbackIdCounter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${fallbackIdCounter.toString(36)}`;
+}
+
+export function buildShoe(decks: number, shoeId = createGameId('shoe')): Card[] {
   const suits: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades'];
   const ranks: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
   const shoe: Card[] = [];
@@ -79,7 +123,14 @@ export function buildShoe(decks: number): Card[] {
         let value = parseInt(rank);
         if (['J', 'Q', 'K'].includes(rank)) value = 10;
         if (rank === 'A') value = 11;
-        shoe.push({ suit, rank, value });
+        shoe.push({
+          id: `${shoeId}-d${d}-${suit}-${rank}`,
+          shoeId,
+          deckIndex: d,
+          suit,
+          rank,
+          value,
+        });
       }
     }
   }
@@ -89,10 +140,34 @@ export function buildShoe(decks: number): Card[] {
 export function shuffle(cards: Card[]): Card[] {
   const shuffled = [...cards];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = secureRandomInt(i + 1);
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
+}
+
+/** Return an unbiased integer in [0, maxExclusive) using Web Crypto. */
+export function secureRandomInt(maxExclusive: number): number {
+  if (!Number.isSafeInteger(maxExclusive) || maxExclusive <= 0 || maxExclusive > 0x100000000) {
+    throw new RangeError(`Invalid secure random range: ${maxExclusive}`);
+  }
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error('Secure random generation is unavailable in this browser.');
+  }
+
+  const range = 0x100000000;
+  const rejectionLimit = range - (range % maxExclusive);
+  const value = new Uint32Array(1);
+  do {
+    globalThis.crypto.getRandomValues(value);
+  } while (value[0] >= rejectionLimit);
+  return value[0] % maxExclusive;
+}
+
+export function randomPenetration([minimum, maximum]: [number, number]): number {
+  const min = Math.round(minimum * 10_000);
+  const max = Math.round(maximum * 10_000);
+  return (min + secureRandomInt(max - min + 1)) / 10_000;
 }
 
 export function calculateHandValue(cards: Card[]): { total: number; soft: boolean } {

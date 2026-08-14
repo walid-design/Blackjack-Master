@@ -1,9 +1,68 @@
-import { GameState, GameAction } from './types';
+import type { CardIntegrity, GameState, GameAction } from './types.ts';
+import type { TableConfig, Card, Hand, Seat } from './blackjack.ts';
 import {
-  calculateHandValue, isBlackjack, TableConfig, Card, buildShoe, shuffle, Hand, Seat,
+  calculateHandValue, isBlackjack, buildShoe, shuffle,
+  createGameId, randomPenetration,
   evaluateBustIt, evaluate21Plus3, evaluateLuckyLadies, evaluateLuckyLucky,
   evaluatePerfectPairs, evaluateRoyalMatch, evaluateSuperSevens
-} from './blackjack';
+} from './blackjack.ts';
+
+function prepareFreshShoe(table: TableConfig, shoeNumber: number): {
+  shoe: Card[];
+  discard: Card[];
+  cutCardIndex: number;
+  penetration: number;
+  lastBurnCardId?: string;
+} {
+  const shoeId = `${table.id}-${shoeNumber}-${createGameId('shoe')}`;
+  const shoe = shuffle(buildShoe(table.decks, shoeId));
+  const penetration = randomPenetration(table.rules.penetration);
+  const cutCardIndex = Math.max(1, shoe.length - Math.floor(shoe.length * penetration));
+  const discard: Card[] = [];
+
+  for (let i = 0; i < table.rules.burnCards; i++) {
+    const burn = shoe.pop();
+    if (burn) discard.push(burn);
+  }
+
+  return {
+    shoe,
+    discard,
+    cutCardIndex,
+    penetration,
+    lastBurnCardId: discard.at(-1)?.id,
+  };
+}
+
+function inspectCardIntegrity(state: Pick<GameState, 'table' | 'shoe' | 'discard' | 'dealerCards' | 'seats'>): CardIntegrity {
+  const cards = [
+    ...state.shoe,
+    ...state.discard,
+    ...state.dealerCards,
+    ...state.seats.flatMap(seat => seat.hands.flatMap(hand => hand.cards)),
+  ];
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  for (const card of cards) {
+    if (seen.has(card.id)) duplicateIds.push(card.id);
+    seen.add(card.id);
+  }
+  const expected = state.table.decks * 52;
+  return {
+    valid: cards.length === expected && duplicateIds.length === 0,
+    total: cards.length,
+    expected,
+    duplicateIds,
+  };
+}
+
+function withCardIntegrity(state: GameState): GameState {
+  const cardIntegrity = inspectCardIntegrity(state);
+  if (!cardIntegrity.valid) {
+    console.error('Blackjack shoe integrity failure', cardIntegrity);
+  }
+  return { ...state, cardIntegrity };
+}
 
 export function createInitialState(table: TableConfig, initialBankroll: number): GameState {
   const seats: Seat[] = Array.from({ length: table.seats }, (_, i) => ({
@@ -14,28 +73,35 @@ export function createInitialState(table: TableConfig, initialBankroll: number):
     sideBets: {},
     sideBetResults: [],
   }));
-  const shoe = shuffle(buildShoe(table.decks));
-  return {
+  const fresh = prepareFreshShoe(table, 1);
+  return withCardIntegrity({
     phase: 'SEAT_SELECTION',
-    shoe,
-    discard: [],
+    table,
+    shoe: fresh.shoe,
+    discard: fresh.discard,
     seats,
     dealerCards: [],
     dealerStatus: 'playing',
     activeSeatIndex: -1,
-    cutCardIndex: Math.floor(shoe.length * 0.25),
+    cutCardIndex: fresh.cutCardIndex,
+    penetration: fresh.penetration,
     needsShuffle: false,
+    shoeNumber: 1,
+    lastBurnCardId: fresh.lastBurnCardId,
+    cardIntegrity: { valid: true, total: table.decks * 52, expected: table.decks * 52, duplicateIds: [] },
     dealSequence: 0,
+    actionLocked: false,
+    settled: false,
     bankroll: initialBankroll,
     bettingSeatId: undefined,
-  };
+  });
 }
 
 type ExtendedAction = GameAction
   | { type: 'PERFORM_SETTLEMENT' }
   | { type: 'DEALER_PLAY' };
 
-export function gameReducer(state: GameState, action: ExtendedAction): GameState {
+function reduceGameState(state: GameState, action: ExtendedAction): GameState {
   switch (action.type) {
     // ── Seat management ──────────────────────────────────────────────────────
     case 'SIT': {
@@ -74,7 +140,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       const seat = { ...s.seats[seatId] };
       const currentBet = seat.hands[0]?.bet || 0;
       seat.hands = [{
-        id: seat.hands[0]?.id || Math.random().toString(36),
+        id: seat.hands[0]?.id || createGameId('hand'),
         cards: [],
         bet: currentBet + amount,
         status: 'playing',
@@ -132,7 +198,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
           ...seat,
           sideBets,
           hands: [{
-            id: Math.random().toString(36),
+            id: createGameId('hand'),
             cards: [],
             bet: mainBet,
             status: 'playing' as const,
@@ -168,6 +234,9 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         dealSequence: state.dealSequence + 1,
         dealerCards: [],
         dealerStatus: 'playing',
+        settled: false,
+        actionLocked: false,
+        pendingTurnAdvance: false,
         activeSeatIndex: -1,
         seats: state.seats.map(seat => {
           if (!seat.isActive) return seat;
@@ -178,7 +247,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
             activeHandIndex: 0,
             sideBetResults: [],
             hands: [{
-              id: Math.random().toString(36),
+              id: createGameId('hand'),
               cards: [],
               bet,
               status: 'playing',
@@ -255,6 +324,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return checkAllDone(withBonuses);
     }
     case 'INSURANCE': {
+      if (state.phase !== 'INSURANCE' || action.seatId !== state.activeSeatIndex) return state;
       const s = { ...state, seats: [...state.seats] };
       const seat = { ...s.seats[s.activeSeatIndex] };
       const insAmount = Math.floor((seat.hands[0]?.bet || 0) / 2);
@@ -265,11 +335,13 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return moveToNextInsurance(s);
     }
     case 'DECLINE_INSURANCE': {
+      if (state.phase !== 'INSURANCE' || action.seatId !== state.activeSeatIndex) return state;
       return moveToNextInsurance({ ...state });
     }
 
     // ── Player actions ────────────────────────────────────────────────────────
     case 'HIT': {
+      if (!canActOnHand(state, action.seatId, action.handId)) return state;
       const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
       const card = s.shoe.pop();
       if (!card) return s;
@@ -286,10 +358,14 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       seat.hands[hi] = hand;
       s.seats[s.activeSeatIndex] = seat;
 
-      if (hand.status !== 'playing') return { ...s, pendingTurnAdvance: true };
-      return s;
+      return {
+        ...s,
+        actionLocked: true,
+        pendingTurnAdvance: hand.status !== 'playing',
+      };
     }
     case 'STAND': {
+      if (!canActOnHand(state, action.seatId, action.handId)) return state;
       const s = { ...state, seats: [...state.seats] };
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       seat.hands[seat.activeHandIndex] = { ...seat.hands[seat.activeHandIndex], status: 'stood' };
@@ -297,12 +373,17 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return moveToNextHand(s);
     }
     case 'DOUBLE': {
+      if (!canActOnHand(state, action.seatId, action.handId)) return state;
       const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       const hi = seat.activeHandIndex;
       const hand = seat.hands[hi];
-      // Double allowed on any number of cards (any-double rule), bankroll must cover extra bet
-      if (s.bankroll < hand.bet) return s;
+      const rules = s.table.rules;
+      if (
+        s.bankroll < hand.bet ||
+        (rules.doubleOnFirstTwoOnly && hand.cards.length !== 2) ||
+        (hand.isSplit && !rules.doubleAfterSplit)
+      ) return state;
 
       s.bankroll -= hand.bet;
       const card = s.shoe.pop();
@@ -319,9 +400,10 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         status: val.total > 21 ? 'busted' : 'stood',
       };
       s.seats[s.activeSeatIndex] = seat;
-      return { ...s, pendingTurnAdvance: true };
+      return { ...s, actionLocked: true, pendingTurnAdvance: true };
     }
     case 'SPLIT': {
+      if (!canActOnHand(state, action.seatId, action.handId)) return state;
       const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       const hi = seat.activeHandIndex;
@@ -330,15 +412,18 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       if (
         s.bankroll < hand.bet ||
         hand.cards.length !== 2 ||
-        hand.cards[0].rank !== hand.cards[1].rank ||
-        seat.hands.length >= 4
-      ) return s;
+        (s.table.rules.splitByValue
+          ? hand.cards[0].value !== hand.cards[1].value
+          : hand.cards[0].rank !== hand.cards[1].rank) ||
+        seat.hands.length >= s.table.rules.maxSplitHands ||
+        (hand.cards[0].rank === 'A' && hand.isSplit && !s.table.rules.resplitAces)
+      ) return state;
 
       s.bankroll -= hand.bet;
 
-      // Create two 1-card hands — second cards arrive one at a time via SPLIT_CARD
+      // Create two one-card hands. Only the active hand receives a card now.
       const hand1: Hand = {
-        id: Math.random().toString(36),
+        id: createGameId('hand'),
         cards: [hand.cards[0]],
         bet: hand.bet,
         status: 'playing',
@@ -346,7 +431,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         doubled: false,
       };
       const hand2: Hand = {
-        id: Math.random().toString(36),
+        id: createGameId('hand'),
         cards: [hand.cards[1]],
         bet: hand.bet,
         status: 'playing',
@@ -357,53 +442,60 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       seat.hands.splice(hi, 1, hand1, hand2);
       s.seats[s.activeSeatIndex] = seat;
 
-      // Enter SPLIT_DEALING — Table.tsx will dispatch SPLIT_CARD twice with 550ms gaps.
-      // Deal to hand[1] (right) first, then hand[0] (left) — standard casino convention.
-      return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 1 };
+      // Complete the first split hand before dealing to the second.
+      return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: hi, actionLocked: true };
     }
 
     case 'SPLIT_CARD': {
+      if (state.phase !== 'SPLIT_DEALING' || state.splitCardTarget === undefined) return state;
       const s = { ...state, shoe: [...state.shoe], seats: [...state.seats] };
-      const targetHandIdx = s.splitCardTarget ?? 0;
+      const targetHandIdx = state.splitCardTarget;
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
-      const isSplitAces = seat.hands[0]?.cards[0]?.rank === 'A';
+      const sourceHand = seat.hands[targetHandIdx];
+      if (!sourceHand || sourceHand.cards.length !== 1) return state;
+      const isSplitAces = sourceHand.isSplit && sourceHand.cards[0]?.rank === 'A';
 
       const card = s.shoe.pop();
       if (!card) return s;
       if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
 
-      const hand = { ...seat.hands[targetHandIdx], cards: [...seat.hands[targetHandIdx].cards, card] };
+      const hand = { ...sourceHand, cards: [...sourceHand.cards, card] };
 
       // Auto-stand: split aces get one card each, or hand is a 21
-      if (isSplitAces || calculateHandValue(hand.cards).total === 21) {
+      if ((isSplitAces && !s.table.rules.hitSplitAces) || calculateHandValue(hand.cards).total === 21) {
         hand.status = 'stood';
       }
 
       seat.hands[targetHandIdx] = hand;
       s.seats[s.activeSeatIndex] = seat;
 
-      if (targetHandIdx === 1) {
-        // Right hand received its card — now deal to the left hand (hand[0])
-        return { ...s, phase: 'SPLIT_DEALING', splitCardTarget: 0 };
-      }
+      return {
+        ...s,
+        phase: 'PLAYER_TURN',
+        splitCardTarget: undefined,
+        actionLocked: true,
+        pendingTurnAdvance: hand.status !== 'playing',
+      };
+    }
+    case 'PLAYER_CARD_LANDED': {
+      if (!state.actionLocked || state.phase !== 'PLAYER_TURN') return state;
+      const seat = state.seats[state.activeSeatIndex];
+      const hand = seat?.hands[seat.activeHandIndex];
+      if (
+        state.activeSeatIndex !== action.seatId ||
+        hand?.id !== action.handId ||
+        hand.cards.at(-1)?.id !== action.cardId
+      ) return state;
 
-      // Both cards dealt — evaluate immediate side bets, then start player turn
-      let next = { ...s, phase: 'PLAYER_TURN', splitCardTarget: undefined } as GameState;
-      next.seats = autoStandBlackjacks(next.seats);
-      next = evaluateImmediateSideBets(next) as GameState;
-      next.activeSeatIndex = s.activeSeatIndex; // stay on the split seat, hand 0
-      // Re-check if hand 0 is playable
-      const splitSeat = next.seats[next.activeSeatIndex];
-      if (splitSeat.hands[0]?.status !== 'playing') {
-        return moveToNextHand(next);
-      }
-      return checkAllDone(next);
+      const unlocked = { ...state, actionLocked: false, pendingTurnAdvance: false };
+      return state.pendingTurnAdvance ? moveToNextHand(unlocked) : unlocked;
     }
     case 'SURRENDER': {
+      if (!canActOnHand(state, action.seatId, action.handId) || !state.table.rules.lateSurrender) return state;
       const s = { ...state, seats: [...state.seats] };
       const seat = { ...s.seats[s.activeSeatIndex], hands: [...s.seats[s.activeSeatIndex].hands] };
       const hand = { ...seat.hands[seat.activeHandIndex] };
-      if (hand.cards.length !== 2) return s;
+      if (hand.cards.length !== 2 || hand.isSplit) return state;
       hand.status = 'surrendered';
       s.bankroll += Math.floor(hand.bet / 2);
       seat.hands[seat.activeHandIndex] = hand;
@@ -411,7 +503,8 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return moveToNextHand(s);
     }
     case 'NEXT_HAND': {
-      return moveToNextHand({ ...state, pendingTurnAdvance: false });
+      if (!state.pendingTurnAdvance) return state;
+      return moveToNextHand({ ...state, actionLocked: false, pendingTurnAdvance: false });
     }
 
     // ── Dealer ────────────────────────────────────────────────────────────────
@@ -419,13 +512,17 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return { ...state, phase: 'DEALER_TURN' };
     }
     case 'DEALER_PLAY': {
+      if (state.phase !== 'DEALER_TURN') return state;
       // Draw exactly one card per action. The UI waits for that card to land
       // before dispatching again, matching a real dealer's draw cadence.
       const s = { ...state, shoe: [...state.shoe] };
       const dealerCards = [...s.dealerCards];
       const currentVal = calculateHandValue(dealerCards);
+      const shouldHit = currentVal.total < 17 || (
+        currentVal.total === 17 && currentVal.soft && s.table.rules.dealerHitsSoft17
+      );
 
-      if (currentVal.total < 17) {
+      if (shouldHit) {
         const card = s.shoe.pop();
         if (card) dealerCards.push(card);
       }
@@ -433,8 +530,11 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       if (s.shoe.length <= s.cutCardIndex) s.needsShuffle = true;
 
       const finalVal = calculateHandValue(dealerCards);
+      const shouldHitAgain = finalVal.total < 17 || (
+        finalVal.total === 17 && finalVal.soft && s.table.rules.dealerHitsSoft17
+      );
       s.dealerCards = dealerCards;
-      if (finalVal.total >= 17 || s.shoe.length === 0) {
+      if (!shouldHitAgain || s.shoe.length === 0) {
         s.dealerStatus = finalVal.total > 21 ? 'busted' as any : 'stood' as any;
         s.phase = 'SETTLEMENT';
       }
@@ -446,14 +546,14 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
       return { ...state, phase: 'SETTLEMENT' };
     }
     case 'PERFORM_SETTLEMENT': {
-      if ((state as any).settled) return state;
+      if (state.phase !== 'SETTLEMENT' || state.settled) return state;
       const s = { ...state } as any;
       s.settled = true;
 
       const dealerVal = calculateHandValue(s.dealerCards).total;
       const dealerBust = dealerVal > 21;
       const dealerBJ = s.dealerStatus === 'blackjack';
-      const multiDeck = s.dealerCards.length > 0; // always true; use table.decks > 1 ideally
+      const multiDeck = s.table.decks > 1;
 
       s.seats = s.seats.map((seat: Seat) => {
         if (!seat.isActive || seat.hands.length === 0) return seat;
@@ -468,7 +568,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
           if (val > 21) return { ...hand, result: 'bust' as const };
           if (isBJ) {
             if (dealerBJ) { wonAmount += hand.bet; return { ...hand, result: 'push' as const }; }
-            const profit = hand.bet * 1.5;
+            const profit = hand.bet * s.table.rules.blackjackPayout;
             wonAmount += hand.bet + profit;
             return { ...hand, result: 'blackjack_win' as const, payout: profit };
           }
@@ -496,7 +596,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         }
         // Perfect Pairs — skip if already paid
         if (seat.sideBets.perfectPairs && firstCards.length >= 2 && !already('Perfect Pairs')) {
-          const res = evaluatePerfectPairs(firstCards, true);
+          const res = evaluatePerfectPairs(firstCards, multiDeck);
           if (res.payout > 0) {
             const win = (seat.sideBets.perfectPairs as number) * res.payout;
             wonAmount += (seat.sideBets.perfectPairs as number) + win;
@@ -507,7 +607,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         }
         // 21+3 — skip if already paid
         if (seat.sideBets.twentyOnePlusThree && firstCards.length >= 2 && s.dealerCards.length >= 1 && !already('21+3')) {
-          const res = evaluate21Plus3(firstCards, s.dealerCards[0], true);
+          const res = evaluate21Plus3(firstCards, s.dealerCards[0], multiDeck);
           if (res.payout > 0) {
             const win = (seat.sideBets.twentyOnePlusThree as number) * res.payout;
             wonAmount += (seat.sideBets.twentyOnePlusThree as number) + win;
@@ -518,7 +618,7 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
         }
         // Lucky Ladies — skip if already paid
         if (seat.sideBets.luckyLadies && firstCards.length >= 2 && !already('Lucky Ladies')) {
-          const res = evaluateLuckyLadies(firstCards, s.dealerCards, true);
+          const res = evaluateLuckyLadies(firstCards, s.dealerCards, multiDeck);
           if (res.payout > 0) {
             const win = (seat.sideBets.luckyLadies as number) * res.payout;
             wonAmount += (seat.sideBets.luckyLadies as number) + win;
@@ -582,34 +682,64 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
 
     // ── Next round ────────────────────────────────────────────────────────────
     case 'NEXT_ROUND': {
-      const s = { ...state } as any;
-      s.settled = false;
-      s.dealerCards = [];
-      s.dealerStatus = 'playing';
-      s.activeSeatIndex = -1;
-      s.bettingSeatId = undefined;
-      s.discard = [...s.discard, ...s.dealerCards];
+      if (state.phase !== 'SETTLEMENT' || !state.settled) return state;
+      const roundCards = [
+        ...state.dealerCards,
+        ...state.seats.flatMap(seat => seat.hands.flatMap(hand => hand.cards)),
+      ];
+      const seats = state.seats.map((seat: Seat) => ({
+        ...seat,
+        hands: [],
+        activeHandIndex: 0,
+        sideBets: {},
+        sideBetResults: [],
+      }));
+      return {
+        ...state,
+        phase: state.needsShuffle ? 'SHUFFLING' : 'BETTING',
+        shuffleStage: state.needsShuffle ? 'collecting' : undefined,
+        settled: false,
+        dealerCards: [],
+        dealerStatus: 'playing',
+        activeSeatIndex: -1,
+        bettingSeatId: undefined,
+        discard: [...state.discard, ...roundCards],
+        seats,
+        actionLocked: state.needsShuffle,
+        pendingTurnAdvance: false,
+      };
+    }
 
-      s.seats = s.seats.map((seat: Seat) => {
-        if (!seat.isActive) return seat;
-        s.discard.push(...seat.hands.flatMap((h: Hand) => h.cards));
-        return {
-          ...seat,
-          hands: [],
-          activeHandIndex: 0,
-          sideBets: {},
-          sideBetResults: [],
-        };
-      });
-
-      if (s.needsShuffle) {
-        s.shoe = shuffle([...s.shoe, ...s.discard]);
-        s.discard = [];
-        s.needsShuffle = false;
+    case 'RESHUFFLE': {
+      if (state.phase !== 'SHUFFLING') return state;
+      if (state.shuffleStage === 'collecting') {
+        return { ...state, shuffleStage: 'shuffling' };
       }
+      if (state.shuffleStage !== 'shuffling') return state;
 
-      s.phase = 'BETTING';
-      return s;
+      const shoeNumber = state.shoeNumber + 1;
+      const fresh = prepareFreshShoe(state.table, shoeNumber);
+      return {
+        ...state,
+        shoe: fresh.shoe,
+        discard: fresh.discard,
+        cutCardIndex: fresh.cutCardIndex,
+        penetration: fresh.penetration,
+        lastBurnCardId: fresh.lastBurnCardId,
+        shoeNumber,
+        needsShuffle: false,
+        shuffleStage: 'burning',
+      };
+    }
+
+    case 'SHUFFLE_COMPLETE': {
+      if (state.phase !== 'SHUFFLING' || state.shuffleStage !== 'burning') return state;
+      return {
+        ...state,
+        phase: state.seats.some(seat => seat.isActive) ? 'BETTING' : 'SEAT_SELECTION',
+        shuffleStage: undefined,
+        actionLocked: false,
+      };
     }
 
     case 'ADD_BANKROLL': {
@@ -621,7 +751,20 @@ export function gameReducer(state: GameState, action: ExtendedAction): GameState
   }
 }
 
+export function gameReducer(state: GameState, action: ExtendedAction): GameState {
+  const next = reduceGameState(state, action);
+  return next === state ? state : withCardIntegrity(next);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function canActOnHand(state: GameState, seatId: number, handId: string): boolean {
+  if (state.phase !== 'PLAYER_TURN' || state.actionLocked || state.pendingTurnAdvance) return false;
+  if (state.activeSeatIndex !== seatId) return false;
+  const seat = state.seats[seatId];
+  const hand = seat?.hands[seat.activeHandIndex];
+  return hand?.id === handId && hand.status === 'playing';
+}
 
 /** Rightmost seat that still has a hand in 'playing' status. */
 function findRightmostActive(seats: Seat[]): number {
@@ -660,6 +803,7 @@ function autoStandBlackjacks(seats: Seat[]): Seat[] {
  */
 function evaluateImmediateSideBets(state: GameState): GameState {
   const dealerUpcard = state.dealerCards[0];
+  const multiDeck = state.table.decks > 1;
   let bankrollDelta = 0;
 
   const seats = state.seats.map(seat => {
@@ -674,7 +818,7 @@ function evaluateImmediateSideBets(state: GameState): GameState {
 
     // Perfect Pairs
     if (seat.sideBets.perfectPairs && !already('Perfect Pairs')) {
-      const r = evaluatePerfectPairs(firstCards, true);
+      const r = evaluatePerfectPairs(firstCards, multiDeck);
       if (r.payout > 0) {
         const w = (seat.sideBets.perfectPairs as number) * r.payout;
         won += (seat.sideBets.perfectPairs as number) + w;
@@ -686,7 +830,7 @@ function evaluateImmediateSideBets(state: GameState): GameState {
 
     // 21+3
     if (seat.sideBets.twentyOnePlusThree && dealerUpcard && !already('21+3')) {
-      const r = evaluate21Plus3(firstCards, dealerUpcard, true);
+      const r = evaluate21Plus3(firstCards, dealerUpcard, multiDeck);
       if (r.payout > 0) {
         const w = (seat.sideBets.twentyOnePlusThree as number) * r.payout;
         won += (seat.sideBets.twentyOnePlusThree as number) + w;
@@ -698,7 +842,7 @@ function evaluateImmediateSideBets(state: GameState): GameState {
 
     // Lucky Ladies
     if (seat.sideBets.luckyLadies && !already('Lucky Ladies')) {
-      const r = evaluateLuckyLadies(firstCards, state.dealerCards, true);
+      const r = evaluateLuckyLadies(firstCards, state.dealerCards, multiDeck);
       if (r.payout > 0) {
         const w = (seat.sideBets.luckyLadies as number) * r.payout;
         won += (seat.sideBets.luckyLadies as number) + w;
@@ -779,6 +923,15 @@ function moveToNextHand(state: GameState): GameState {
     const nextHand = seat.hands[newIdx];
     s.seats[s.activeSeatIndex] = { ...seat, activeHandIndex: newIdx };
     if (nextHand.status !== 'playing') return moveToNextHand(s);
+    if (nextHand.isSplit && nextHand.cards.length === 1) {
+      return {
+        ...s,
+        phase: 'SPLIT_DEALING',
+        splitCardTarget: newIdx,
+        actionLocked: true,
+        pendingTurnAdvance: false,
+      };
+    }
     return s;
   }
 
