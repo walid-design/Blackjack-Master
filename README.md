@@ -1,6 +1,15 @@
 # Royal Ace Blackjack
 
-A social-blackjack web game with realistic shoe dealing, multiple casino table themes, virtual play chips, daily rewards, progression, and a payment-safe chip-shop foundation.
+A full-stack social blackjack platform demonstrating server-authoritative game state, transactional virtual-wallet design, idempotent APIs, and a payment-safe product boundary.
+
+## Engineering highlights
+
+- Server-controlled shuffling, dealing, wagering, actions, balances, and payouts
+- PostgreSQL row locking and version checks for concurrent game requests
+- Append-only wallet ledger with idempotent grants and transactions
+- React 19 client with an Express 5 and Drizzle ORM backend
+- Automated game-engine, schema, and economy tests
+- Explicit safeguards that keep demo chips non-transferable and prevent real payment activation
 
 ## Run and verify
 
